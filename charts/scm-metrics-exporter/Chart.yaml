@@ -1,11 +1,12 @@
 apiVersion: v2
 name: scm-metrics-exporter
-description: Kubernetes operator that reconciles GitHubMetricsExporter and GitLabMetricsExporter custom resources into SCM metrics exporter Deployments.
+description: >-
+  Kubernetes operator that reconciles GitHubMetricsExporter and
+  GitLabMetricsExporter custom resources into SCM metrics exporter Deployments.
 type: application
-# version and appVersion are bumped by release-please (annotations below).
-version: 0.1.0 # x-release-please-version
-appVersion: "0.1.0" # x-release-please-version
-kubeVersion: ">=1.29.0-0"
+version: 0.2.0
+appVersion: 0.1.0
+kubeVersion: '>=1.29.0-0'
 home: https://github.com/jalet/scm-metrics-exporter
 sources:
   - https://github.com/jalet/scm-metrics-exporter
