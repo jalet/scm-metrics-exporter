@@ -1,0 +1,13 @@
+apiVersion: scm.jalet.io/v1alpha1
+kind: GitHubMetricsExporter
+metadata:
+  name: acme-github
+spec:
+  org: acme
+  authMode: token
+  tokenKey: token
+  credentialsSecret:
+    name: acme-github-credentials
+  pollInterval: 5m
+  export:
+    exporter: prometheus

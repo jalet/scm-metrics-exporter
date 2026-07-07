@@ -1,0 +1,5 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- scm_v1alpha1_githubmetricsexporter.yaml
+- scm_v1alpha1_gitlabmetricsexporter.yaml

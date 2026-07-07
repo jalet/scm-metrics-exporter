@@ -1,0 +1,288 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: githubmetricsexporters.scm.jalet.io
+spec:
+  group: scm.jalet.io
+  names:
+    kind: GitHubMetricsExporter
+    listKind: GitHubMetricsExporterList
+    plural: githubmetricsexporters
+    shortNames:
+    - ghme
+    singular: githubmetricsexporter
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.org
+      name: Org
+      type: string
+    - jsonPath: .spec.authMode
+      name: Auth
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: GitHubMetricsExporter is the Schema for the githubmetricsexporters
+          API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: GitHubMetricsExporterSpec configures a GitHub metrics exporter.
+            properties:
+              appID:
+                description: AppID is the GitHub App ID (authMode "app").
+                format: int64
+                type: integer
+              appInstallationID:
+                description: AppInstallationID is the GitHub App installation ID (authMode
+                  "app").
+                format: int64
+                type: integer
+              appPrivateKeyKey:
+                description: |-
+                  AppPrivateKeyKey is the CredentialsSecret key holding the App private key PEM
+                  (authMode "app").
+                type: string
+              authMode:
+                default: token
+                description: AuthMode selects the credential type held in CredentialsSecret.
+                enum:
+                - token
+                - app
+                type: string
+              codeScanningTool:
+                description: |-
+                  CodeScanningTool optionally filters code scanning alerts to one SARIF tool
+                  (for example "CodeQL"). Empty counts all tools.
+                type: string
+              credentialsSecret:
+                description: |-
+                  CredentialsSecret names the Secret in the CR's namespace holding the provider
+                  credentials referenced by the provider-specific key fields.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              export:
+                description: Export selects and tunes how metrics leave the exporter.
+                properties:
+                  exporter:
+                    default: prometheus
+                    description: Exporter selects the OTEL metrics exporter backend.
+                    enum:
+                    - prometheus
+                    - otlp
+                    type: string
+                  otlpEndpoint:
+                    description: OTLPEndpoint is the OTLP metrics endpoint, used when
+                      Exporter is "otlp".
+                    type: string
+                type: object
+              image:
+                description: |-
+                  Image overrides the exporter container image. When empty the operator injects
+                  its own image reference.
+                type: string
+              org:
+                description: Org is the GitHub organization to poll.
+                minLength: 1
+                type: string
+              pollInterval:
+                default: 5m
+                description: PollInterval is how often the exporter polls the provider.
+                type: string
+              replicas:
+                default: 1
+                description: Replicas is the number of exporter pods.
+                format: int32
+                minimum: 1
+                type: integer
+              resources:
+                description: Resources are the exporter container's compute resources.
+                properties:
+                  claims:
+                    description: |-
+                      Claims lists the names of resources, defined in spec.resourceClaims,
+                      that are used by this container.
+
+                      This field depends on the
+                      DynamicResourceAllocation feature gate.
+
+                      This field is immutable. It can only be set for containers.
+                    items:
+                      description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                      properties:
+                        name:
+                          description: |-
+                            Name must match the name of one entry in pod.spec.resourceClaims of
+                            the Pod where this field is used. It makes that resource available
+                            inside a container.
+                          type: string
+                        request:
+                          description: |-
+                            Request is the name chosen for a request in the referenced claim.
+                            If empty, everything from the claim is made available, otherwise
+                            only the result of this request.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  limits:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: |-
+                      Limits describes the maximum amount of compute resources allowed.
+                      More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                    type: object
+                  requests:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: |-
+                      Requests describes the minimum amount of compute resources required.
+                      If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                      otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                      More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                    type: object
+                type: object
+              serviceMonitor:
+                description: |-
+                  ServiceMonitor, when true, makes the operator create a Prometheus Operator
+                  ServiceMonitor for the exporter (requires the ServiceMonitor CRD present).
+                type: boolean
+              tokenKey:
+                description: TokenKey is the CredentialsSecret key holding a PAT (authMode
+                  "token").
+                type: string
+            required:
+            - authMode
+            - credentialsSecret
+            - org
+            type: object
+            x-kubernetes-validations:
+            - message: authMode 'app' requires appID, appInstallationID, and appPrivateKeyKey
+              rule: self.authMode != 'app' || (has(self.appID) && self.appID > 0 &&
+                has(self.appInstallationID) && self.appInstallationID > 0 && has(self.appPrivateKeyKey)
+                && size(self.appPrivateKeyKey) > 0)
+            - message: authMode 'token' requires tokenKey
+              rule: self.authMode != 'token' || (has(self.tokenKey) && size(self.tokenKey)
+                > 0)
+          status:
+            description: ExporterStatus is the shared status for provider CRDs.
+            properties:
+              conditions:
+                description: Conditions describe the current state of the exporter.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation most recently
+                  reconciled.
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

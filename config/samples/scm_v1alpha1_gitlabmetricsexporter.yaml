@@ -1,0 +1,10 @@
+apiVersion: scm.jalet.io/v1alpha1
+kind: GitLabMetricsExporter
+metadata:
+  name: acme-gitlab
+spec:
+  group: acme
+  tokenKey: token
+  credentialsSecret:
+    name: acme-gitlab-credentials
+  pollInterval: 5m
