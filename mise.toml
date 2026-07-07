@@ -1,0 +1,51 @@
+# mise -- tooling version pins and task runner (PGT ADR 011 convention).
+# Tools are pinned here; developers and CI run `mise run <task>` rather than
+# installing tools ad-hoc. CI's entrypoint is `mise run ci`.
+#
+# Naming note (PGT): `fmt` / `fmt:check` are inherited GLOBAL tasks meaning
+# markdown formatting (rumdl). Go tasks are namespaced `fmt:go` / `lint:go`.
+# Do not shadow the global markdown tasks with a bare `fmt`.
+#
+# Operator + packaging tooling (kustomize, kind, controller-gen, setup-envtest,
+# govulncheck, helm) is added to [tools] and [tasks] in Epics 07 / 11 / 12, and
+# `ci` gains manifests:check, vuln, and helm lint/template there.
+
+[settings]
+lockfile = true
+lockfile_platforms = ["macos-arm64", "linux-x64"]
+minimum_release_age = "7d"
+
+[tools]
+go = "1.26"
+golangci-lint = "2.10.1"
+
+[tasks."fmt:go"]
+description = "Format Go code and tidy modules"
+run = ["gofmt -w .", "go mod tidy"]
+
+[tasks."fmt:go:check"]
+description = "Fail if Go code is not gofmt-clean"
+run = 'test -z "$(gofmt -l .)"'
+
+[tasks.vet]
+description = "go vet"
+run = "go vet ./..."
+
+[tasks."lint:go"]
+description = "Run golangci-lint"
+run = "golangci-lint run ./..."
+
+[tasks.build]
+description = "Build the exporter and operator binaries"
+run = [
+  "go build -o bin/exporter ./cmd/exporter",
+  "go build -o bin/operator ./cmd/operator",
+]
+
+[tasks.test]
+description = "Run unit tests with the race detector, shuffled"
+run = "go test -race -shuffle=on ./..."
+
+[tasks.ci]
+description = "Run all CI checks (extended per epic in Epic 12)"
+depends = ["fmt:go:check", "vet", "lint:go", "build", "test"]
