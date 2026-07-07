@@ -1,0 +1,2 @@
+# kustomize bases scaffolded by Kubebuilder (Epic 07+): crd, rbac, manager,
+# default, samples, prometheus.
