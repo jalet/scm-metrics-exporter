@@ -8,11 +8,61 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 
 	scmv1alpha1 "github.com/jalet/scm-metrics-exporter/api/v1alpha1"
 )
+
+// serviceMonitorGVK identifies the Prometheus Operator ServiceMonitor kind. It is a
+// soft dependency: the operator only renders ServiceMonitors when this kind is served
+// by the API server. ServiceMonitors are built as unstructured objects so the module
+// takes no dependency on the prometheus-operator API types.
+var serviceMonitorGVK = schema.GroupVersionKind{
+	Group:   "monitoring.coreos.com",
+	Version: "v1",
+	Kind:    "ServiceMonitor",
+}
+
+// newServiceMonitor returns an empty ServiceMonitor shell with only its GVK set. The
+// GVK must be present before any client call so the client can resolve the REST mapping.
+func newServiceMonitor() *unstructured.Unstructured {
+	sm := &unstructured.Unstructured{}
+	sm.SetGroupVersionKind(serviceMonitorGVK)
+	return sm
+}
+
+// githubServiceMonitor renders the desired ServiceMonitor for a GitHub CR. Its selector
+// matches the exporter Service's labels and it scrapes the named metrics port; the zero
+// namespaceSelector limits scraping to the CR's own namespace.
+func githubServiceMonitor(cr *scmv1alpha1.GitHubMetricsExporter) *unstructured.Unstructured {
+	labels := selectorLabels(cr.Name)
+	sm := newServiceMonitor()
+	sm.SetName(cr.Name)
+	sm.SetNamespace(cr.Namespace)
+	sm.SetLabels(labels)
+	sm.Object["spec"] = map[string]any{
+		"selector": map[string]any{
+			"matchLabels": labelsToAny(labels),
+		},
+		"endpoints": []any{
+			map[string]any{"port": metricsPortName},
+		},
+	}
+	return sm
+}
+
+// labelsToAny converts a label map to the map[string]any form apimachinery requires
+// inside unstructured objects.
+func labelsToAny(m map[string]string) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
 
 const (
 	metricsPort     = 9464

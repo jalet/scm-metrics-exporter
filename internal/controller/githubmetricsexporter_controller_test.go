@@ -37,7 +37,10 @@ func TestMain(m *testing.M) {
 
 func runEnvtest(m *testing.M) int {
 	testEnv := &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		CRDDirectoryPaths: []string{
+			filepath.Join("..", "..", "config", "crd", "bases"),
+			"testdata", // minimal stand-in ServiceMonitor CRD
+		},
 		ErrorIfCRDPathMissing: true,
 	}
 	cfg, err := testEnv.Start()

@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -35,6 +36,10 @@ type GitHubMetricsExporterReconciler struct {
 	// ExporterImage is the image used for exporter Deployments when the CR does not
 	// override spec.image.
 	ExporterImage string
+	// serviceMonitorAvailable records whether monitoring.coreos.com/v1 ServiceMonitor
+	// was served by the API server at manager startup. It gates both the .Owns watch
+	// and per-reconcile ServiceMonitor create/update.
+	serviceMonitorAvailable bool
 }
 
 // +kubebuilder:rbac:groups=scm.jalet.io,resources=githubmetricsexporters,verbs=get;list;watch;create;update;patch;delete
@@ -43,6 +48,7 @@ type GitHubMetricsExporterReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile ensures the exporter Deployment and Service match the CR, and reflects
 // readiness (or a credentials problem) in the CR status.
@@ -84,6 +90,10 @@ func (r *GitHubMetricsExporterReconciler) Reconcile(ctx context.Context, req ctr
 		return ctrl.Result{}, fmt.Errorf("reconcile service: %w", err)
 	}
 
+	if err := r.reconcileServiceMonitor(ctx, &cr); err != nil {
+		return ctrl.Result{}, fmt.Errorf("reconcile servicemonitor: %w", err)
+	}
+
 	if deploymentAvailable(dep) {
 		setReady(&cr, metav1.ConditionTrue, reasonReconciled, "exporter deployment is available")
 	} else {
@@ -122,14 +132,84 @@ func (r *GitHubMetricsExporterReconciler) updateStatus(ctx context.Context, cr *
 	return result, nil
 }
 
-// SetupWithManager registers the reconciler and the child objects it owns.
+// reconcileServiceMonitor creates or updates the ServiceMonitor when it is both wanted
+// (spec.serviceMonitor) and possible (the CRD was installed at startup); otherwise it
+// ensures none exists. It never errors when the prometheus-operator CRD is absent.
+func (r *GitHubMetricsExporterReconciler) reconcileServiceMonitor(ctx context.Context, cr *scmv1alpha1.GitHubMetricsExporter) error {
+	if r.serviceMonitorAvailable && cr.Spec.ServiceMonitor {
+		return r.applyServiceMonitor(ctx, cr)
+	}
+	return r.deleteServiceMonitor(ctx, cr)
+}
+
+func (r *GitHubMetricsExporterReconciler) applyServiceMonitor(ctx context.Context, cr *scmv1alpha1.GitHubMetricsExporter) error {
+	sm := newServiceMonitor()
+	sm.SetName(cr.Name)
+	sm.SetNamespace(cr.Namespace)
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, sm, func() error {
+		desired := githubServiceMonitor(cr)
+		sm.SetLabels(desired.GetLabels())
+		sm.Object["spec"] = desired.Object["spec"]
+		return controllerutil.SetControllerReference(cr, sm, r.Scheme)
+	})
+	if meta.IsNoMatchError(err) {
+		return nil // CRD uninstalled between startup and now
+	}
+	return err
+}
+
+// deleteServiceMonitor removes the ServiceMonitor if present, tolerating both the
+// object already being gone and the CRD being absent, so clusters without
+// prometheus-operator never error here.
+func (r *GitHubMetricsExporterReconciler) deleteServiceMonitor(ctx context.Context, cr *scmv1alpha1.GitHubMetricsExporter) error {
+	sm := newServiceMonitor()
+	sm.SetName(cr.Name)
+	sm.SetNamespace(cr.Namespace)
+	if err := r.Delete(ctx, sm); err != nil {
+		if meta.IsNoMatchError(err) {
+			return nil
+		}
+		return client.IgnoreNotFound(err)
+	}
+	return nil
+}
+
+// serviceMonitorInstalled reports whether monitoring.coreos.com/v1 ServiceMonitor is
+// served by the API server. A discovery/transport failure returns an error rather than
+// assuming absent.
+func serviceMonitorInstalled(mapper meta.RESTMapper) (bool, error) {
+	_, err := mapper.RESTMapping(serviceMonitorGVK.GroupKind(), serviceMonitorGVK.Version)
+	switch {
+	case err == nil:
+		return true, nil
+	case meta.IsNoMatchError(err):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+// SetupWithManager registers the reconciler and the child objects it owns. The
+// ServiceMonitor watch is added only when the prometheus-operator CRD is present at
+// startup, since a watch cannot be added to a running controller.
 func (r *GitHubMetricsExporterReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	available, err := serviceMonitorInstalled(mgr.GetRESTMapper())
+	if err != nil {
+		ctrl.Log.WithName("setup").Error(err, "could not determine ServiceMonitor CRD availability; assuming absent")
+		available = false
+	}
+	r.serviceMonitorAvailable = available
+
+	b := ctrl.NewControllerManagedBy(mgr).
 		For(&scmv1alpha1.GitHubMetricsExporter{}).
 		Owns(&appsv1.Deployment{}).
-		Owns(&corev1.Service{}).
-		Named("githubmetricsexporter").
-		Complete(r)
+		Owns(&corev1.Service{})
+	if available {
+		// OnlyMetadata: the owner-ref watch needs metadata only, and it avoids the cache
+		// deep-decoding a type the scheme does not know.
+		b = b.Owns(newServiceMonitor(), builder.OnlyMetadata)
+	}
+	return b.Named("githubmetricsexporter").Complete(r)
 }
 
 func setReady(cr *scmv1alpha1.GitHubMetricsExporter, status metav1.ConditionStatus, reason, message string) {
