@@ -1,4 +1,3 @@
----
 # golangci-lint v2 configuration.
 # Extended in Epic 12 (CI) if additional linters are warranted.
 version: "2"
@@ -7,7 +6,7 @@ run:
   timeout: 5m
 
 linters:
-  default: standard  # errcheck, govet, ineffassign, staticcheck, unused
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
   enable:
     - bodyclose
     - errorlint
@@ -23,6 +22,11 @@ linters:
           - errcheck
           - gosec
           - revive
+      # "metrics" is our own internal package; revive's stdlib-name-conflict
+      # check (runtime/metrics) is a false positive here.
+      - linters:
+          - revive
+        text: "avoid package names that conflict with Go standard library"
 
 formatters:
   enable:
