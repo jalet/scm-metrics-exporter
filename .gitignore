@@ -1,0 +1,25 @@
+# Backlog / working notes (local only, not version controlled)
+/tasks/
+
+# Build output
+/bin/
+/dist/
+*.test
+*.out
+coverage*
+
+# Secrets -- never commit
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+
+# mise local overrides (mise.lock IS committed)
+mise.local.toml
+.mise.local.toml
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
