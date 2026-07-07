@@ -17,6 +17,7 @@ minimum_release_age = "7d"
 [tools]
 go = "1.26"
 golangci-lint = "2.10.1"
+helm = "4.2.2"
 "go:sigs.k8s.io/controller-tools/cmd/controller-gen" = "v0.21.0"
 "go:sigs.k8s.io/controller-runtime/tools/setup-envtest" = "release-0.24"
 
@@ -73,11 +74,23 @@ export KUBEBUILDER_ASSETS="$(setup-envtest use "$ENVTEST_K8S_VERSION" -p path)"
 go test -race ./internal/controller/...
 '''
 
+[tasks."chart:sync"]
+description = "Regenerate the chart CRD + ClusterRole templates from config/ (run after manifests)"
+run = "bash hack/chart-sync.sh"
+
+[tasks."helm:lint"]
+description = "Lint the Helm chart"
+run = "helm lint charts/scm-metrics-exporter"
+
+[tasks."helm:template"]
+description = "Render the Helm chart (smoke check)"
+run = "helm template scm charts/scm-metrics-exporter >/dev/null"
+
 [tasks."manifests:check"]
-description = "Regenerate code + manifests and fail if the committed generated files are stale"
-depends = ["generate", "manifests"]
-run = "git diff --exit-code -- config 'api/**/zz_generated.deepcopy.go'"
+description = "Regenerate code + manifests + chart sync and fail if committed generated files are stale"
+depends = ["generate", "manifests", "chart:sync"]
+run = "git diff --exit-code -- config 'api/**/zz_generated.deepcopy.go' 'charts/scm-metrics-exporter/templates/crds.yaml' 'charts/scm-metrics-exporter/templates/clusterrole.yaml'"
 
 [tasks.ci]
 description = "Run all CI checks (extended per epic in Epic 12)"
-depends = ["fmt:go:check", "vet", "lint:go", "manifests:check", "build", "test"]
+depends = ["fmt:go:check", "vet", "lint:go", "manifests:check", "build", "test", "helm:lint", "helm:template"]

@@ -1,0 +1,22 @@
+{{ .Chart.Name }} {{ .Chart.AppVersion }} installed as release {{ .Release.Name | quote }} in namespace {{ .Release.Namespace | quote }}.
+
+The operator is now watching for custom resources. Create one to start exporting metrics, for example:
+
+  apiVersion: scm.jalet.io/v1alpha1
+  kind: GitHubMetricsExporter
+  metadata:
+    name: my-org
+    namespace: {{ .Release.Namespace }}
+  spec:
+    org: my-org
+    authMode: token
+    tokenKey: token
+    credentialsSecret:
+      name: my-org-credentials   # a Secret with key "token" = a GitHub PAT
+    serviceMonitor: {{ .Values.serviceMonitor.enabled }}
+
+The operator creates the exporter Deployment, Service{{ if (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}, and (when spec.serviceMonitor is true) a ServiceMonitor{{ end }} for each CR.
+{{- if not .Values.crds.enabled }}
+
+WARNING: crds.enabled=false -- install the CRDs separately or the custom resources above will be rejected.
+{{- end }}

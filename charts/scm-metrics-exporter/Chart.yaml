@@ -1,0 +1,20 @@
+apiVersion: v2
+name: scm-metrics-exporter
+description: Kubernetes operator that reconciles GitHubMetricsExporter and GitLabMetricsExporter custom resources into SCM metrics exporter Deployments.
+type: application
+# version is the chart's own SemVer (bump on any chart change).
+version: 0.1.0
+# appVersion tracks the operator/exporter image release.
+appVersion: "0.1.0"
+kubeVersion: ">=1.29.0-0"
+home: https://github.com/jalet/scm-metrics-exporter
+sources:
+  - https://github.com/jalet/scm-metrics-exporter
+keywords:
+  - operator
+  - metrics
+  - opentelemetry
+  - github
+  - gitlab
+maintainers:
+  - name: jalet

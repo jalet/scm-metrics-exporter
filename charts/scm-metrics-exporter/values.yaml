@@ -1,0 +1,90 @@
+# Default values for scm-metrics-exporter (the operator).
+
+image:
+  repository: ghcr.io/jalet/scm-metrics-exporter
+  # tag defaults to .Chart.AppVersion when empty.
+  tag: ""
+  # digest, when set, pins the image and overrides tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# exporterImage is the image the operator injects into the exporter Deployments it
+# creates. When repository is empty it reuses the operator image (single-image model).
+exporterImage:
+  repository: ""
+  tag: ""
+
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 1
+
+leaderElection:
+  enabled: true
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+rbac:
+  create: true
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 128Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+podAnnotations: {}
+priorityClassName: ""
+
+# CRDs are templated and gated (cert-manager pattern). crds.keep adds
+# helm.sh/resource-policy: keep so `helm uninstall` never deletes them (and the CRs).
+crds:
+  enabled: true
+  keep: true
+
+# The operator's own metrics endpoint.
+metrics:
+  bindAddress: ":8080"
+  service:
+    port: 8080
+
+# ServiceMonitor for the OPERATOR's own metrics (per-exporter ServiceMonitors are
+# created by the operator, not this chart). Requires the prometheus-operator CRD.
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  labels: {}
+
+# Optional demo CR; off by default so `helm install` does not spin up an exporter.
+sampleCR:
+  enabled: false
+  provider: github
+  org: acme
+  authMode: token
+  tokenKey: token
+  credentialsSecret: acme-github-credentials

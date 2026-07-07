@@ -1,0 +1,15 @@
+{{- if .Values.sampleCR.enabled }}
+apiVersion: scm.jalet.io/v1alpha1
+kind: GitHubMetricsExporter
+metadata:
+  name: {{ include "scm-metrics-exporter.fullname" . }}-sample
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "scm-metrics-exporter.labels" . | nindent 4 }}
+spec:
+  org: {{ .Values.sampleCR.org | quote }}
+  authMode: {{ .Values.sampleCR.authMode | quote }}
+  tokenKey: {{ .Values.sampleCR.tokenKey | quote }}
+  credentialsSecret:
+    name: {{ .Values.sampleCR.credentialsSecret | quote }}
+{{- end }}

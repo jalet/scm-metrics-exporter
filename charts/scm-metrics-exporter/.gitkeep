@@ -1,2 +1,0 @@
-# Helm 4 chart (Epic 11): Chart.yaml, values.yaml, values.schema.json,
-# templates/, ci/. CRDs are templated and gated (crds.enabled / crds.keep).
