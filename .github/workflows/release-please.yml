@@ -12,7 +12,21 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
+      # Mint an installation token from the GitHub App. App tokens -- unlike the
+      # default GITHUB_TOKEN -- DO trigger downstream workflows, so the release tag
+      # release-please pushes starts release.yml and publishes to GHCR. Without
+      # this, GITHUB_TOKEN's recursion guard means the tag triggers nothing.
+      # continue-on-error + the GITHUB_TOKEN fallback keep release-please working
+      # before the App secrets exist (release PRs still manage fine; artifacts just
+      # won't publish until RELEASE_APP_ID / RELEASE_APP_PRIVATE_KEY are set).
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        continue-on-error: true
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
