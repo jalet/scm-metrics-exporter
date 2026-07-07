@@ -51,9 +51,9 @@ Short name `glme`. Spec = `ExporterSpec` plus:
 
 **Printer columns:** `Group`, `Ready`, `Age`.
 
-Note: the CRD is installed, but the GitLab provider and controller are not wired in
-yet (planned). A `GitLabMetricsExporter` is accepted by the API server but not
-reconciled until that lands.
+Note: vulnerability findings require the GitLab Ultimate tier; open merge-request
+counts work on all tiers. When findings are unavailable the exporter records a
+scrape error and still reports merge-request counts.
 
 ## Status (`ExporterStatus`)
 
