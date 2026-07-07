@@ -12,6 +12,10 @@ url = "https://dl.google.com/go/go1.26.4.linux-amd64.tar.gz"
 checksum = "sha256:b62ad2b6d7d2464f12a5bcad7ff47f19d08325773b5efd21610e445a05a9bf53"
 url = "https://dl.google.com/go/go1.26.4.darwin-arm64.tar.gz"
 
+[[tools."go:sigs.k8s.io/controller-runtime/tools/setup-envtest"]]
+version = "release-0.24"
+backend = "go:sigs.k8s.io/controller-runtime/tools/setup-envtest"
+
 [[tools."go:sigs.k8s.io/controller-tools/cmd/controller-gen"]]
 version = "0.21.0"
 backend = "go:sigs.k8s.io/controller-tools/cmd/controller-gen"

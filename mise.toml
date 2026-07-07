@@ -18,6 +18,10 @@ minimum_release_age = "7d"
 go = "1.26"
 golangci-lint = "2.10.1"
 "go:sigs.k8s.io/controller-tools/cmd/controller-gen" = "v0.21.0"
+"go:sigs.k8s.io/controller-runtime/tools/setup-envtest" = "release-0.24"
+
+[env]
+ENVTEST_K8S_VERSION = "1.34.0"
 
 [tasks."fmt:go"]
 description = "Format Go code and tidy modules"
@@ -60,7 +64,14 @@ run = "controller-gen object:headerFile=hack/boilerplate.go.txt paths=./api/..."
 
 [tasks.manifests]
 description = "controller-gen: CRDs and the manager RBAC role"
-run = "controller-gen crd rbac:roleName=manager-role paths=./... output:crd:artifacts:config=config/crd/bases"
+run = "controller-gen crd rbac:roleName=manager-role paths=./... output:crd:artifacts:config=config/crd/bases output:rbac:artifacts:config=config/rbac"
+
+[tasks."test:envtest"]
+description = "Run controller tests against a real API server (envtest)"
+run = '''
+export KUBEBUILDER_ASSETS="$(setup-envtest use "$ENVTEST_K8S_VERSION" -p path)"
+go test -race ./internal/controller/...
+'''
 
 [tasks."manifests:check"]
 description = "Regenerate code + manifests and fail if the committed generated files are stale"

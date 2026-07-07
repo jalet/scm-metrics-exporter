@@ -22,6 +22,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	scmv1alpha1 "github.com/jalet/scm-metrics-exporter/api/v1alpha1"
+	"github.com/jalet/scm-metrics-exporter/internal/controller"
 )
 
 var (
@@ -58,7 +59,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Reconcilers are registered here in Epic 09 (GitHub) and Epic 16 (GitLab).
+	// exporterImage is the image the reconciler puts in exporter Deployments; the
+	// Helm chart sets it to the operator's own image by default.
+	exporterImage := os.Getenv("EXPORTER_IMAGE")
+	if err := (&controller.GitHubMetricsExporterReconciler{
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		ExporterImage: exporterImage,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "GitHubMetricsExporter")
+		os.Exit(1)
+	}
+	// The GitLab reconciler is registered here in Epic 16.
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
