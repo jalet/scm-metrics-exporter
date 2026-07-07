@@ -1,10 +1,9 @@
-# mise -- tooling version pins and task runner (PGT ADR 011 convention).
+# mise -- tooling version pins and task runner.
 # Tools are pinned here; developers and CI run `mise run <task>` rather than
 # installing tools ad-hoc. CI's entrypoint is `mise run ci`.
 #
-# Naming note (PGT): `fmt` / `fmt:check` are inherited GLOBAL tasks meaning
-# markdown formatting (rumdl). Go tasks are namespaced `fmt:go` / `lint:go`.
-# Do not shadow the global markdown tasks with a bare `fmt`.
+# Go tasks are namespaced `fmt:go` / `lint:go` to leave the bare `fmt` name free
+# for other formatters (e.g. markdown) added later.
 #
 # Operator + packaging tooling (kustomize, kind, controller-gen, setup-envtest,
 # govulncheck, helm) is added to [tools] and [tasks] in Epics 07 / 11 / 12, and

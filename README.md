@@ -48,7 +48,7 @@ Never commit tokens or private keys; provide them by path or environment only.
 
 ## Develop
 
-Tooling is pinned with [mise](https://mise.jdx.dev) (PGT ADR 011). Common tasks:
+Tooling is pinned with [mise](https://mise.jdx.dev). Common tasks:
 
 ```sh
 mise run build      # build both binaries into ./bin
