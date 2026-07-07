@@ -27,6 +27,10 @@ linters:
       - linters:
           - revive
         text: "avoid package names that conflict with Go standard library"
+      # Tests legitimately read fixture files and drive local httptest servers.
+      - path: _test\.go
+        linters:
+          - gosec
 
 formatters:
   enable:

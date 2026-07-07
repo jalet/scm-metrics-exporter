@@ -1,0 +1,27 @@
+{
+  "data": {
+    "organization": {
+      "repositories": {
+        "pageInfo": { "hasNextPage": true, "endCursor": "CURSOR2" },
+        "nodes": [
+          {
+            "name": "alpha",
+            "pullRequests": { "totalCount": 3 },
+            "vulnerabilityAlerts": {
+              "nodes": [
+                { "securityVulnerability": { "severity": "MODERATE" } },
+                { "securityVulnerability": { "severity": "HIGH" } }
+              ]
+            }
+          },
+          {
+            "name": "beta",
+            "pullRequests": { "totalCount": 0 },
+            "vulnerabilityAlerts": { "nodes": [] }
+          }
+        ]
+      }
+    },
+    "rateLimit": { "remaining": 4990 }
+  }
+}

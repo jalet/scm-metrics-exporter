@@ -1,0 +1,9 @@
+[
+  {
+    "number": 3,
+    "state": "open",
+    "rule": { "id": "go/weak-crypto", "severity": "warning", "security_severity_level": "medium" },
+    "tool": { "name": "CodeQL" },
+    "repository": { "name": "beta", "full_name": "testorg/beta" }
+  }
+]

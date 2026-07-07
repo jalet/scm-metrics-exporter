@@ -1,0 +1,21 @@
+{
+  "data": {
+    "organization": {
+      "repositories": {
+        "pageInfo": { "hasNextPage": false, "endCursor": "" },
+        "nodes": [
+          {
+            "name": "gamma",
+            "pullRequests": { "totalCount": 7 },
+            "vulnerabilityAlerts": {
+              "nodes": [
+                { "securityVulnerability": { "severity": "CRITICAL" } }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "rateLimit": { "remaining": 4989 }
+  }
+}

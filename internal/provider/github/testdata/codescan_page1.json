@@ -1,0 +1,16 @@
+[
+  {
+    "number": 1,
+    "state": "open",
+    "rule": { "id": "go/sql-injection", "severity": "error", "security_severity_level": "high" },
+    "tool": { "name": "CodeQL" },
+    "repository": { "name": "alpha", "full_name": "testorg/alpha" }
+  },
+  {
+    "number": 2,
+    "state": "open",
+    "rule": { "id": "go/path-injection", "severity": "error", "security_severity_level": "critical" },
+    "tool": { "name": "CodeQL" },
+    "repository": { "name": "gamma", "full_name": "testorg/gamma" }
+  }
+]

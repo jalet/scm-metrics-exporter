@@ -1,0 +1,21 @@
+{
+  "data": {
+    "organization": {
+      "repositories": {
+        "pageInfo": { "hasNextPage": false, "endCursor": "" },
+        "nodes": [
+          {
+            "name": "solo",
+            "pullRequests": { "totalCount": 1 },
+            "vulnerabilityAlerts": {
+              "nodes": [
+                { "securityVulnerability": { "severity": "HIGH" } }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "rateLimit": { "remaining": 5000 }
+  }
+}
