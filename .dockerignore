@@ -1,0 +1,15 @@
+# VCS and CI
+.git
+.gitignore
+.github
+
+# Local build output and working files
+/bin
+/dist
+/tasks
+
+# Tooling and docs not needed to build the binaries
+*.md
+.golangci.yml
+Dockerfile
+.dockerignore

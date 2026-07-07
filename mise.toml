@@ -45,6 +45,14 @@ run = [
 description = "Run unit tests with the race detector, shuffled"
 run = "go test -race -shuffle=on ./..."
 
+[tasks."image:build"]
+description = "Build the container image for the host architecture and load it into Docker"
+run = "docker build --load -t scm-metrics-exporter:dev ."
+
+[tasks."image:buildx"]
+description = "Build the multi-arch (amd64+arm64) image; add --push in CI to publish"
+run = "docker buildx build --platform linux/amd64,linux/arm64 -t scm-metrics-exporter:dev ."
+
 [tasks.ci]
 description = "Run all CI checks (extended per epic in Epic 12)"
 depends = ["fmt:go:check", "vet", "lint:go", "build", "test"]
