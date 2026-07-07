@@ -17,6 +17,7 @@ minimum_release_age = "7d"
 [tools]
 go = "1.26"
 golangci-lint = "2.10.1"
+"go:sigs.k8s.io/controller-tools/cmd/controller-gen" = "v0.21.0"
 
 [tasks."fmt:go"]
 description = "Format Go code and tidy modules"
@@ -53,6 +54,19 @@ run = "docker build --load -t scm-metrics-exporter:dev ."
 description = "Build the multi-arch (amd64+arm64) image; add --push in CI to publish"
 run = "docker buildx build --platform linux/amd64,linux/arm64 -t scm-metrics-exporter:dev ."
 
+[tasks.generate]
+description = "controller-gen: DeepCopy and other generated code"
+run = "controller-gen object:headerFile=hack/boilerplate.go.txt paths=./api/..."
+
+[tasks.manifests]
+description = "controller-gen: CRDs and the manager RBAC role"
+run = "controller-gen crd rbac:roleName=manager-role paths=./... output:crd:artifacts:config=config/crd/bases"
+
+[tasks."manifests:check"]
+description = "Regenerate code + manifests and fail if the committed generated files are stale"
+depends = ["generate", "manifests"]
+run = "git diff --exit-code -- config 'api/**/zz_generated.deepcopy.go'"
+
 [tasks.ci]
 description = "Run all CI checks (extended per epic in Epic 12)"
-depends = ["fmt:go:check", "vet", "lint:go", "build", "test"]
+depends = ["fmt:go:check", "vet", "lint:go", "manifests:check", "build", "test"]

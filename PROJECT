@@ -1,0 +1,10 @@
+# Kubebuilder project configuration.
+# Tracks the layout so controller-gen and `kubebuilder create api` behave
+# consistently. Resource entries are added alongside the API types in Epic 08.
+# https://book.kubebuilder.io/reference/project-config.html
+domain: jalet.io
+layout:
+- go.kubebuilder.io/v4
+projectName: scm-metrics-exporter
+repo: github.com/jalet/scm-metrics-exporter
+version: "3"
