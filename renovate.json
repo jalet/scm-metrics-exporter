@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":dependencyDashboard"
+  ],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "groupName": "go modules"
+    },
+    {
+      "matchManagers": ["mise"],
+      "groupName": "mise tools",
+      "postUpgradeTasks": {
+        "commands": ["mise lock"],
+        "fileFilters": ["mise.lock"],
+        "executionMode": "branch"
+      }
+    }
+  ]
+}

@@ -20,6 +20,7 @@ golangci-lint = "2.10.1"
 helm = "4.2.2"
 "go:sigs.k8s.io/controller-tools/cmd/controller-gen" = "v0.21.0"
 "go:sigs.k8s.io/controller-runtime/tools/setup-envtest" = "release-0.24"
+"go:golang.org/x/vuln/cmd/govulncheck" = "latest"
 
 [env]
 ENVTEST_K8S_VERSION = "1.34.0"
@@ -50,6 +51,10 @@ run = [
 [tasks.test]
 description = "Run unit tests with the race detector, shuffled"
 run = "go test -race -shuffle=on ./..."
+
+[tasks.vuln]
+description = "Scan for known vulnerabilities (govulncheck)"
+run = "govulncheck ./..."
 
 [tasks."image:build"]
 description = "Build the container image for the host architecture and load it into Docker"
@@ -93,4 +98,4 @@ run = "git diff --exit-code -- config 'api/**/zz_generated.deepcopy.go' 'charts/
 
 [tasks.ci]
 description = "Run all CI checks (extended per epic in Epic 12)"
-depends = ["fmt:go:check", "vet", "lint:go", "manifests:check", "build", "test", "helm:lint", "helm:template"]
+depends = ["fmt:go:check", "vet", "lint:go", "manifests:check", "vuln", "build", "test", "helm:lint", "helm:template"]
