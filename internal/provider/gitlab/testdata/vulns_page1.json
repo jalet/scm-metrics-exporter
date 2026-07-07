@@ -1,0 +1,14 @@
+{
+  "data": {
+    "group": {
+      "vulnerabilities": {
+        "pageInfo": { "hasNextPage": true, "endCursor": "CUR2" },
+        "nodes": [
+          { "severity": "HIGH", "reportType": "DEPENDENCY_SCANNING", "project": { "fullPath": "testgroup/alpha" } },
+          { "severity": "CRITICAL", "reportType": "SAST", "project": { "fullPath": "testgroup/alpha" } },
+          { "severity": "MEDIUM", "reportType": "SECRET_DETECTION", "project": { "fullPath": "testgroup/delta" } }
+        ]
+      }
+    }
+  }
+}

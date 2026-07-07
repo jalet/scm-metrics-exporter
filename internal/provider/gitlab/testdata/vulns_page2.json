@@ -1,0 +1,13 @@
+{
+  "data": {
+    "group": {
+      "vulnerabilities": {
+        "pageInfo": { "hasNextPage": false, "endCursor": "" },
+        "nodes": [
+          { "severity": "LOW", "reportType": "CONTAINER_SCANNING", "project": { "fullPath": "testgroup/gamma" } },
+          { "severity": "HIGH", "reportType": "DAST", "project": { "fullPath": "testgroup/alpha" } }
+        ]
+      }
+    }
+  }
+}

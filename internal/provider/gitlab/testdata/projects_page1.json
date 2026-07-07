@@ -1,0 +1,4 @@
+[
+  { "id": 1, "path_with_namespace": "testgroup/alpha" },
+  { "id": 2, "path_with_namespace": "testgroup/beta" }
+]
