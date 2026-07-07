@@ -3,7 +3,11 @@
 version: "2"
 
 run:
-  timeout: 5m
+  # Generous ceiling: on a cold CI cache golangci-lint type-checks the full
+  # (k8s-heavy) dependency graph via go/packages while build/test/vet/vuln run
+  # concurrently. 5m was too tight and timed out during package loading; the Go
+  # build cache (restored in CI) is the real fix, this is insurance against hangs.
+  timeout: 10m
 
 linters:
   default: standard # errcheck, govet, ineffassign, staticcheck, unused
