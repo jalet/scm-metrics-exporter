@@ -79,6 +79,10 @@ export KUBEBUILDER_ASSETS="$(setup-envtest use "$ENVTEST_K8S_VERSION" -p path)"
 go test -race ./internal/controller/...
 '''
 
+[tasks."test:e2e"]
+description = "Run the gated end-to-end test against the current kube-context (operator must be installed)"
+run = "RUN_E2E=1 go test -count=1 ./test/e2e/..."
+
 [tasks."chart:sync"]
 description = "Regenerate the chart CRD + ClusterRole templates from config/ (run after manifests)"
 run = "bash hack/chart-sync.sh"

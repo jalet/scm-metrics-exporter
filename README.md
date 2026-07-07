@@ -6,10 +6,9 @@ backend (a Prometheus scrape endpoint or an OTLP push) is chosen at runtime from
 single instrumentation surface. A companion Kubernetes operator reconciles
 per-provider custom resources into exporter Deployments.
 
-- **GitHub** is fully supported (open pull requests, Dependabot alerts, code
-  scanning alerts).
-- **GitLab** support is in progress; the `GitLabMetricsExporter` CRD exists but the
-  provider and its controller are not wired in yet.
+- **GitHub** (open pull requests, Dependabot alerts, code scanning alerts).
+- **GitLab** (open merge requests, and vulnerability findings on the Ultimate tier:
+  dependency, SAST, secret, and container scanning).
 
 ## Contents
 
@@ -116,11 +115,30 @@ spec:
   codeScanningTool: CodeQL         # optional: count only this SARIF tool
 ```
 
+**GitLab:** create a Secret with a group or personal access token under `token`, then:
+
+```yaml
+apiVersion: scm.jalet.io/v1alpha1
+kind: GitLabMetricsExporter
+metadata:
+  name: acme
+  namespace: scm-system
+spec:
+  group: acme
+  tokenKey: token
+  credentialsSecret:
+    name: acme-gitlab
+  baseURL: https://gitlab.com      # or your self-hosted instance
+```
+
+Vulnerability findings require GitLab Ultimate; open merge-request counts work on all
+tiers.
+
 Inspect status:
 
 ```sh
-kubectl get githubmetricsexporter -n scm-system   # shortname: ghme
-kubectl describe ghme acme -n scm-system          # see the Ready / CredentialsInvalid condition
+kubectl get githubmetricsexporter,gitlabmetricsexporter -n scm-system   # shortnames: ghme, glme
+kubectl describe ghme acme -n scm-system                                # see the Ready / CredentialsInvalid condition
 ```
 
 ## Run the exporter directly

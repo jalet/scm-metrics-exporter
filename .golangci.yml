@@ -3,7 +3,14 @@
 version: "2"
 
 run:
-  timeout: 5m
+  # Generous ceiling for the cold-cache CI path. `mise run ci` runs lint:go,
+  # build, test and vet concurrently; on a cold cache all four cold-compile the
+  # k8s-heavy dependency graph and starve each other for CPU on a 4-core runner.
+  # golangci-lint's analysis completes fine (0 issues) but its wall-clock deadline
+  # races the sibling compiles: 5m and 10m both lost that race (~740s observed).
+  # The restored Go build cache makes warm runs fast; 20m lets the occasional
+  # cold run (fresh cache / post-eviction) finish, succeed, and repopulate it.
+  timeout: 20m
 
 linters:
   default: standard # errcheck, govet, ineffassign, staticcheck, unused
