@@ -54,6 +54,7 @@ rules:
   - scm.jalet.io
   resources:
   - githubmetricsexporters
+  - gitlabmetricsexporters
   verbs:
   - create
   - delete
@@ -66,12 +67,14 @@ rules:
   - scm.jalet.io
   resources:
   - githubmetricsexporters/finalizers
+  - gitlabmetricsexporters/finalizers
   verbs:
   - update
 - apiGroups:
   - scm.jalet.io
   resources:
   - githubmetricsexporters/status
+  - gitlabmetricsexporters/status
   verbs:
   - get
   - patch

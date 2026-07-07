@@ -18,31 +18,23 @@ import (
 	scmv1alpha1 "github.com/jalet/scm-metrics-exporter/api/v1alpha1"
 )
 
-// GitHubMetricsExporterReconciler reconciles a GitHubMetricsExporter into an exporter
-// Deployment, Service, and (optionally) ServiceMonitor.
-type GitHubMetricsExporterReconciler struct {
+// GitLabMetricsExporterReconciler reconciles a GitLabMetricsExporter into an exporter
+// Deployment, Service, and (optionally) ServiceMonitor. It shares the provider-neutral
+// rendering and reconcile helpers with the GitHub reconciler.
+type GitLabMetricsExporterReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	// ExporterImage is the image used for exporter Deployments when the CR does not
-	// override spec.image.
-	ExporterImage string
-	// serviceMonitorAvailable records whether the ServiceMonitor CRD was served at
-	// manager startup.
+	Scheme                  *runtime.Scheme
+	ExporterImage           string
 	serviceMonitorAvailable bool
 }
 
-// +kubebuilder:rbac:groups=scm.jalet.io,resources=githubmetricsexporters,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=scm.jalet.io,resources=githubmetricsexporters/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=scm.jalet.io,resources=githubmetricsexporters/finalizers,verbs=update
-// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
-// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=scm.jalet.io,resources=gitlabmetricsexporters,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=scm.jalet.io,resources=gitlabmetricsexporters/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=scm.jalet.io,resources=gitlabmetricsexporters/finalizers,verbs=update
 
-// Reconcile ensures the exporter Deployment, Service, and ServiceMonitor match the CR,
-// and reflects readiness (or a credentials problem) in the CR status.
-func (r *GitHubMetricsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	var cr scmv1alpha1.GitHubMetricsExporter
+// Reconcile ensures the exporter children match the CR and reflects readiness in status.
+func (r *GitLabMetricsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	var cr scmv1alpha1.GitLabMetricsExporter
 	if err := r.Get(ctx, req.NamespacedName, &cr); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -59,7 +51,7 @@ func (r *GitHubMetricsExporterReconciler) Reconcile(ctx context.Context, req ctr
 
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: cr.Name, Namespace: cr.Namespace}}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, dep, func() error {
-		desired := githubDeployment(&cr, image)
+		desired := gitlabDeployment(&cr, image)
 		dep.Labels = desired.Labels
 		dep.Spec = desired.Spec
 		return controllerutil.SetControllerReference(&cr, dep, r.Scheme)
@@ -90,9 +82,7 @@ func (r *GitHubMetricsExporterReconciler) Reconcile(ctx context.Context, req ctr
 	return r.updateStatus(ctx, &cr, ctrl.Result{})
 }
 
-// checkCredentials verifies the referenced Secret exists and holds the key required by
-// the CR's auth mode.
-func (r *GitHubMetricsExporterReconciler) checkCredentials(ctx context.Context, cr *scmv1alpha1.GitHubMetricsExporter) error {
+func (r *GitLabMetricsExporterReconciler) checkCredentials(ctx context.Context, cr *scmv1alpha1.GitLabMetricsExporter) error {
 	var secret corev1.Secret
 	name := types.NamespacedName{Name: cr.Spec.CredentialsSecret.Name, Namespace: cr.Namespace}
 	if err := r.Get(ctx, name, &secret); err != nil {
@@ -101,18 +91,13 @@ func (r *GitHubMetricsExporterReconciler) checkCredentials(ctx context.Context, 
 		}
 		return err
 	}
-
-	wantKey := cr.Spec.TokenKey
-	if cr.Spec.AuthMode == "app" {
-		wantKey = cr.Spec.AppPrivateKeyKey
-	}
-	if _, ok := secret.Data[wantKey]; !ok {
-		return fmt.Errorf("credentials Secret %q is missing key %q", cr.Spec.CredentialsSecret.Name, wantKey)
+	if _, ok := secret.Data[cr.Spec.TokenKey]; !ok {
+		return fmt.Errorf("credentials Secret %q is missing key %q", cr.Spec.CredentialsSecret.Name, cr.Spec.TokenKey)
 	}
 	return nil
 }
 
-func (r *GitHubMetricsExporterReconciler) updateStatus(ctx context.Context, cr *scmv1alpha1.GitHubMetricsExporter, result ctrl.Result) (ctrl.Result, error) {
+func (r *GitLabMetricsExporterReconciler) updateStatus(ctx context.Context, cr *scmv1alpha1.GitLabMetricsExporter, result ctrl.Result) (ctrl.Result, error) {
 	cr.Status.ObservedGeneration = cr.Generation
 	if err := r.Status().Update(ctx, cr); err != nil {
 		return ctrl.Result{}, fmt.Errorf("update status: %w", err)
@@ -120,9 +105,8 @@ func (r *GitHubMetricsExporterReconciler) updateStatus(ctx context.Context, cr *
 	return result, nil
 }
 
-// SetupWithManager registers the reconciler and the child objects it owns. The
-// ServiceMonitor watch is added only when the CRD is present at startup.
-func (r *GitHubMetricsExporterReconciler) SetupWithManager(mgr ctrl.Manager) error {
+// SetupWithManager registers the reconciler and the child objects it owns.
+func (r *GitLabMetricsExporterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	available, err := serviceMonitorInstalled(mgr.GetRESTMapper())
 	if err != nil {
 		ctrl.Log.WithName("setup").Error(err, "could not determine ServiceMonitor CRD availability; assuming absent")
@@ -131,11 +115,11 @@ func (r *GitHubMetricsExporterReconciler) SetupWithManager(mgr ctrl.Manager) err
 	r.serviceMonitorAvailable = available
 
 	b := ctrl.NewControllerManagedBy(mgr).
-		For(&scmv1alpha1.GitHubMetricsExporter{}).
+		For(&scmv1alpha1.GitLabMetricsExporter{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{})
 	if available {
 		b = b.Owns(newServiceMonitor(), builder.OnlyMetadata)
 	}
-	return b.Named("githubmetricsexporter").Complete(r)
+	return b.Named("gitlabmetricsexporter").Complete(r)
 }

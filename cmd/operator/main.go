@@ -70,7 +70,14 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "GitHubMetricsExporter")
 		os.Exit(1)
 	}
-	// The GitLab reconciler is registered here in Epic 16.
+	if err := (&controller.GitLabMetricsExporterReconciler{
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		ExporterImage: exporterImage,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "GitLabMetricsExporter")
+		os.Exit(1)
+	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")

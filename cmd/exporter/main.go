@@ -21,6 +21,7 @@ import (
 	"github.com/jalet/scm-metrics-exporter/internal/metrics"
 	"github.com/jalet/scm-metrics-exporter/internal/provider"
 	providergithub "github.com/jalet/scm-metrics-exporter/internal/provider/github"
+	providergitlab "github.com/jalet/scm-metrics-exporter/internal/provider/gitlab"
 )
 
 // Build metadata, populated via -ldflags "-X main.version=...".
@@ -31,7 +32,7 @@ var (
 )
 
 func main() {
-	providerName := flag.String("provider", "github", "source-control provider to poll (github)")
+	providerName := flag.String("provider", "github", "source-control provider to poll (github|gitlab)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -49,12 +50,12 @@ func main() {
 }
 
 func run(ctx context.Context, providerName string) error {
-	cfg, err := config.Load()
+	cfg, err := config.Load(providerName)
 	if err != nil {
 		return err
 	}
 
-	prov, err := buildProvider(providerName, cfg)
+	prov, err := buildProvider(cfg)
 	if err != nil {
 		return err
 	}
@@ -62,7 +63,7 @@ func run(ctx context.Context, providerName string) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	coll := collector.New(collector.Entry{Provider: prov, Target: cfg.GithubOrg})
+	coll := collector.New(collector.Entry{Provider: prov, Target: cfg.Target()})
 
 	mp, recordScrapeErr, err := metrics.Setup(ctx, coll)
 	if err != nil {
@@ -78,7 +79,7 @@ func run(ctx context.Context, providerName string) error {
 
 	zlog.Info().
 		Str("provider", prov.Name()).
-		Str("target", cfg.GithubOrg).
+		Str("target", cfg.Target()).
 		Dur("poll_interval", cfg.PollInterval).
 		Str("exporter", os.Getenv("OTEL_METRICS_EXPORTER")).
 		Msg("scm-metrics-exporter starting")
@@ -88,24 +89,31 @@ func run(ctx context.Context, providerName string) error {
 	return coll.Run(ctx, cfg.PollInterval, recordScrapeErr)
 }
 
-func buildProvider(name string, cfg config.Config) (provider.Provider, error) {
-	switch name {
+func buildProvider(cfg config.Config) (provider.Provider, error) {
+	switch cfg.Provider {
 	case "github":
 		p, err := providergithub.New(providergithub.Options{
-			Token:             cfg.Token,
-			AppID:             cfg.AppID,
-			AppInstallationID: cfg.AppInstallationID,
-			AppPrivateKeyPath: cfg.AppPrivateKeyPath,
-			CodeScanningTool:  cfg.CodeScanningTool,
+			Token:             cfg.GitHub.Token,
+			AppID:             cfg.GitHub.AppID,
+			AppInstallationID: cfg.GitHub.AppInstallationID,
+			AppPrivateKeyPath: cfg.GitHub.AppPrivateKeyPath,
+			CodeScanningTool:  cfg.GitHub.CodeScanningTool,
 		})
 		if err != nil {
 			return nil, err
 		}
 		return p, nil
 	case "gitlab":
-		return nil, fmt.Errorf("provider %q is not yet built into this binary (see Epic 16)", name)
+		p, err := providergitlab.New(providergitlab.Options{
+			Token:   cfg.GitLab.Token,
+			BaseURL: cfg.GitLab.BaseURL,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return p, nil
 	default:
-		return nil, fmt.Errorf("unknown provider %q (supported: github)", name)
+		return nil, fmt.Errorf("unknown provider %q (supported: github, gitlab)", cfg.Provider)
 	}
 }
 

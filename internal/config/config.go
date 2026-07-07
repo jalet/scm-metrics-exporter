@@ -1,5 +1,5 @@
 // Package config loads and validates the exporter's runtime configuration from
-// environment variables.
+// environment variables, per selected provider.
 package config
 
 import (
@@ -15,52 +15,87 @@ const defaultPollInterval = 5 * time.Minute
 // Config holds the exporter's runtime settings. Exporter-backend selection
 // (OTEL_METRICS_EXPORTER and friends) is read by the OpenTelemetry SDK, not here.
 type Config struct {
-	GithubOrg         string
+	Provider     string
+	PollInterval time.Duration
+	GitHub       GitHubConfig
+	GitLab       GitLabConfig
+}
+
+// GitHubConfig holds GitHub provider settings.
+type GitHubConfig struct {
+	Org               string
 	Token             string
 	AppID             int64
 	AppInstallationID int64
 	AppPrivateKeyPath string
 	CodeScanningTool  string
-	PollInterval      time.Duration
 }
 
-// Load reads the configuration from the environment and validates it. It fails fast
+// GitLabConfig holds GitLab provider settings.
+type GitLabConfig struct {
+	Group   string
+	Token   string
+	BaseURL string
+}
+
+// Load reads and validates the configuration for the given provider. It fails fast
 // with an actionable error when required values are missing or malformed.
-func Load() (Config, error) {
-	cfg := Config{
-		GithubOrg:         os.Getenv("GITHUB_ORG"),
-		Token:             os.Getenv("GITHUB_TOKEN"),
-		AppPrivateKeyPath: os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"),
-		CodeScanningTool:  os.Getenv("GITHUB_CODE_SCANNING_TOOL"),
-	}
+func Load(providerName string) (Config, error) {
+	cfg := Config{Provider: providerName}
 
 	var err error
-	if cfg.AppID, err = getenvInt64("GITHUB_APP_ID"); err != nil {
-		return Config{}, err
-	}
-	if cfg.AppInstallationID, err = getenvInt64("GITHUB_APP_INSTALLATION_ID"); err != nil {
-		return Config{}, err
-	}
 	if cfg.PollInterval, err = getenvDuration("POLL_INTERVAL", defaultPollInterval); err != nil {
 		return Config{}, err
 	}
 
-	if err := cfg.validate(); err != nil {
-		return Config{}, err
+	switch providerName {
+	case "github":
+		cfg.GitHub = GitHubConfig{
+			Org:               os.Getenv("GITHUB_ORG"),
+			Token:             os.Getenv("GITHUB_TOKEN"),
+			AppPrivateKeyPath: os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"),
+			CodeScanningTool:  os.Getenv("GITHUB_CODE_SCANNING_TOOL"),
+		}
+		if cfg.GitHub.AppID, err = getenvInt64("GITHUB_APP_ID"); err != nil {
+			return Config{}, err
+		}
+		if cfg.GitHub.AppInstallationID, err = getenvInt64("GITHUB_APP_INSTALLATION_ID"); err != nil {
+			return Config{}, err
+		}
+		if err := cfg.GitHub.validate(); err != nil {
+			return Config{}, err
+		}
+	case "gitlab":
+		cfg.GitLab = GitLabConfig{
+			Group:   os.Getenv("GITLAB_GROUP"),
+			Token:   os.Getenv("GITLAB_TOKEN"),
+			BaseURL: os.Getenv("GITLAB_URL"),
+		}
+		if err := cfg.GitLab.validate(); err != nil {
+			return Config{}, err
+		}
+	default:
+		return Config{}, fmt.Errorf("config: unknown provider %q (supported: github, gitlab)", providerName)
 	}
 	return cfg, nil
 }
 
-// validate enforces that GITHUB_ORG is set and exactly one usable auth method is
-// configured. GitHub App auth (the complete trio) takes precedence over a PAT.
-func (c Config) validate() error {
-	if c.GithubOrg == "" {
+// Target returns the poll target (organization or group) for the selected provider.
+func (c Config) Target() string {
+	if c.Provider == "gitlab" {
+		return c.GitLab.Group
+	}
+	return c.GitHub.Org
+}
+
+// validate enforces GITHUB_ORG plus exactly one usable auth method (App trio takes
+// precedence over a PAT).
+func (c GitHubConfig) validate() error {
+	if c.Org == "" {
 		return errors.New("config: GITHUB_ORG is required")
 	}
-
 	appComplete := c.AppID != 0 && c.AppInstallationID != 0 && c.AppPrivateKeyPath != ""
 	appPartial := !appComplete && (c.AppID != 0 || c.AppInstallationID != 0 || c.AppPrivateKeyPath != "")
-
 	switch {
 	case appComplete:
 		return nil
@@ -71,6 +106,16 @@ func (c Config) validate() error {
 	default:
 		return errors.New("config: no GitHub credentials: set GITHUB_TOKEN or the GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY_PATH trio")
 	}
+}
+
+func (c GitLabConfig) validate() error {
+	if c.Group == "" {
+		return errors.New("config: GITLAB_GROUP is required")
+	}
+	if c.Token == "" {
+		return errors.New("config: GITLAB_TOKEN is required")
+	}
+	return nil
 }
 
 func getenvInt64(key string) (int64, error) {
