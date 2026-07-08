@@ -51,7 +51,10 @@ jobs:
 
       - name: Webhook rejects a CR with a missing Secret
         run: |
+          # crds.enabled=false: ct install already created the CRDs and (crds.keep=true)
+          # left them owned by its release, so this fresh install must not re-adopt them.
           helm install scm charts/scm-metrics-exporter -n scm-system --create-namespace \
+            --set crds.enabled=false \
             --set image.repository=scm-metrics-exporter --set image.tag=e2e --set image.pullPolicy=Never \
             --wait --timeout 3m
           cat > /tmp/bad-cr.yaml <<'EOF'
