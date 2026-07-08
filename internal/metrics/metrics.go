@@ -19,11 +19,17 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
 
 	"github.com/jalet/scm-metrics-exporter/internal/provider"
 )
 
-const meterName = "github.com/jalet/scm-metrics-exporter"
+const (
+	meterName = "github.com/jalet/scm-metrics-exporter"
+	// serviceName is the default service.name resource attribute (surfaced as
+	// target_info{service_name=...}); OTEL_SERVICE_NAME overrides it.
+	serviceName = "scm-metrics-exporter"
+)
 
 // Instrument names (provider-neutral; no github.* prefix).
 const (
@@ -69,16 +75,36 @@ type ScrapeErrorRecorder func(providerName, source string)
 // OTEL_EXPORTER_PROMETHEUS_HOST:PORT (default localhost:9464); set the host to
 // 0.0.0.0 in a container. Do not stand up a separate HTTP server.
 //
-// version stamps the instrumentation scope; it surfaces as the otel_scope_version
-// label (Prometheus) / scope version (OTLP) on every series. Pass the build
-// version; an empty string is valid and leaves the label empty.
+// version stamps both the instrumentation scope (otel_scope_version label /
+// OTLP scope version) and the resource service.version (target_info /
+// resource). It also sets service.name so target_info reports
+// "scm-metrics-exporter" instead of the default "unknown_service:exporter".
+// OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES override the resource defaults.
+// Pass the build version; an empty string is valid.
 func Setup(ctx context.Context, src SnapshotSource, version string) (*sdkmetric.MeterProvider, ScrapeErrorRecorder, error) {
 	reader, err := autoexport.NewMetricReader(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("metrics: create reader: %w", err)
 	}
 
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	// WithFromEnv is applied last so OTEL_SERVICE_NAME / OTEL_RESOURCE_ATTRIBUTES
+	// win over the built-in defaults; no builtin unknown_service fallback is used.
+	res, err := resource.New(ctx,
+		resource.WithTelemetrySDK(),
+		resource.WithAttributes(
+			attribute.String("service.name", serviceName),
+			attribute.String("service.version", version),
+		),
+		resource.WithFromEnv(),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("metrics: build resource: %w", err)
+	}
+
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(reader),
+		sdkmetric.WithResource(res),
+	)
 	otel.SetMeterProvider(mp)
 
 	record, err := register(mp.Meter(meterName, metric.WithInstrumentationVersion(version)), src)
