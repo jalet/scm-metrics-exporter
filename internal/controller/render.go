@@ -159,6 +159,12 @@ func githubEnv(cr *scmv1alpha1.GitHubMetricsExporter) []corev1.EnvVar {
 	if cr.Spec.CodeScanningTool != "" {
 		env = append(env, corev1.EnvVar{Name: "GITHUB_CODE_SCANNING_TOOL", Value: cr.Spec.CodeScanningTool})
 	}
+	if cr.Spec.CollectWorkflows {
+		env = append(env,
+			corev1.EnvVar{Name: "GITHUB_COLLECT_WORKFLOWS", Value: "true"},
+			corev1.EnvVar{Name: "GITHUB_WORKFLOW_LOOKBACK", Value: cr.Spec.WorkflowLookback.Duration.String()},
+		)
+	}
 	if cr.Spec.AuthMode == "app" {
 		return append(env,
 			corev1.EnvVar{Name: "GITHUB_APP_ID", Value: strconv.FormatInt(cr.Spec.AppID, 10)},

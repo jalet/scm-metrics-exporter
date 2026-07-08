@@ -114,6 +114,8 @@ func buildProvider(cfg config.Config, repo string) (provider.Provider, error) {
 			TargetType:        cfg.GitHub.TargetType,
 			RepoScope:         repo,
 			CodeScanningTool:  cfg.GitHub.CodeScanningTool,
+			CollectWorkflows:  cfg.GitHub.CollectWorkflows,
+			WorkflowLookback:  cfg.GitHub.WorkflowLookback,
 		})
 		if err != nil {
 			return nil, err

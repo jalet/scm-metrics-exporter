@@ -51,6 +51,8 @@ Short name `ghme`. Spec = `ExporterSpec` plus:
 | `appInstallationID` | integer | | GitHub App installation ID (required when `authMode: app`). |
 | `appPrivateKeyKey` | string | | Secret key holding the App private key PEM (required when `authMode: app`). |
 | `codeScanningTool` | string | (all tools) | Filter code scanning alerts to one SARIF tool. |
+| `collectWorkflows` | boolean | `false` | Collect recent GitHub Actions workflow-run metrics (`scm_workflow_runs_recent`). Opt-in: adds an API call per repo and extra cardinality. |
+| `workflowLookback` | duration string | `168h` | How far back to count workflow runs (used when `collectWorkflows: true`). |
 
 With `authMode: app`, each collection Job mints a repository-scoped installation token
 (least privilege). Install one App per organization to give each CR its own rate budget.

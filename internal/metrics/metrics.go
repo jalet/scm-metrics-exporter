@@ -39,6 +39,7 @@ const (
 	metricRateLimitRemaining = "scm.api.rate_limit_remaining"
 	metricScrapeErrors       = "scm.exporter.scrape_errors"
 	metricRepoInfo           = "scm.repo.info"
+	metricWorkflowRuns       = "scm.workflow_runs.recent"
 )
 
 // Metric attribute keys.
@@ -55,6 +56,8 @@ const (
 	attrArchived          = "archived"
 	attrBranchProtected   = "branch_protected"
 	attrDependabotEnabled = "dependabot_enabled"
+	attrWorkflow          = "workflow"
+	attrConclusion        = "conclusion"
 )
 
 // SnapshotSource is the read side of the collector cache that the metrics callback
@@ -154,6 +157,11 @@ func register(meter metric.Meter, src SnapshotSource, dims Dimensions) (ScrapeEr
 	if err != nil {
 		return nil, fmt.Errorf("metrics: gauge %s: %w", metricRepoInfo, err)
 	}
+	workflowRuns, err := meter.Int64ObservableGauge(metricWorkflowRuns,
+		metric.WithDescription("Recent CI workflow runs per repository, by workflow and conclusion, within the lookback window."))
+	if err != nil {
+		return nil, fmt.Errorf("metrics: gauge %s: %w", metricWorkflowRuns, err)
+	}
 	scrapeErrors, err := meter.Int64Counter(metricScrapeErrors,
 		metric.WithDescription("Provider scrape errors, by source."))
 	if err != nil {
@@ -166,11 +174,11 @@ func register(meter metric.Meter, src SnapshotSource, dims Dimensions) (ScrapeEr
 			if !ok {
 				continue
 			}
-			observeSnapshot(o, name, snap, reviewItems, findings, rateLimit, repoInfo, dims)
+			observeSnapshot(o, name, snap, gauges{reviewItems, findings, rateLimit, repoInfo, workflowRuns}, dims)
 		}
 		return nil
 	}
-	if _, err := meter.RegisterCallback(callback, reviewItems, findings, rateLimit, repoInfo); err != nil {
+	if _, err := meter.RegisterCallback(callback, reviewItems, findings, rateLimit, repoInfo, workflowRuns); err != nil {
 		return nil, fmt.Errorf("metrics: register callback: %w", err)
 	}
 
@@ -191,18 +199,28 @@ type findingKey struct {
 	severity, category, ecosystem, tool string
 }
 
+// gauges bundles the observable gauges so observeSnapshot takes one parameter instead of a
+// long positional list.
+type gauges struct {
+	reviewItems  metric.Int64ObservableGauge
+	findings     metric.Int64ObservableGauge
+	rateLimit    metric.Int64ObservableGauge
+	repoInfo     metric.Int64ObservableGauge
+	workflowRuns metric.Int64ObservableGauge
+}
+
 // observeSnapshot emits the per-provider gauges for one snapshot. dims selects the
 // optional ecosystem/tool finding labels.
-func observeSnapshot(o metric.Observer, name string, snap provider.Snapshot, reviewItems, findings, rateLimit, repoInfo metric.Int64ObservableGauge, dims Dimensions) {
+func observeSnapshot(o metric.Observer, name string, snap provider.Snapshot, g gauges, dims Dimensions) {
 	for _, repo := range snap.Repos {
-		o.ObserveInt64(reviewItems, int64(repo.OpenReviewItems),
+		o.ObserveInt64(g.reviewItems, int64(repo.OpenReviewItems),
 			metric.WithAttributes(
 				attribute.String(attrProvider, name),
 				attribute.String(attrRepo, repo.Name),
 			))
 
 		if p := repo.Posture; p != nil {
-			o.ObserveInt64(repoInfo, 1, metric.WithAttributes(
+			o.ObserveInt64(g.repoInfo, 1, metric.WithAttributes(
 				attribute.String(attrProvider, name),
 				attribute.String(attrRepo, repo.Name),
 				attribute.String(attrVisibility, p.Visibility),
@@ -236,12 +254,21 @@ func observeSnapshot(o metric.Observer, name string, snap provider.Snapshot, rev
 			if key.tool != "" {
 				attrs = append(attrs, attribute.String(attrTool, key.tool))
 			}
-			o.ObserveInt64(findings, count, metric.WithAttributes(attrs...))
+			o.ObserveInt64(g.findings, count, metric.WithAttributes(attrs...))
+		}
+
+		for _, wf := range repo.WorkflowRuns {
+			o.ObserveInt64(g.workflowRuns, int64(wf.Count), metric.WithAttributes(
+				attribute.String(attrProvider, name),
+				attribute.String(attrRepo, repo.Name),
+				attribute.String(attrWorkflow, wf.Workflow),
+				attribute.String(attrConclusion, wf.Conclusion),
+			))
 		}
 	}
 
 	for _, rl := range snap.RateLimits {
-		o.ObserveInt64(rateLimit, rl.Remaining,
+		o.ObserveInt64(g.rateLimit, rl.Remaining,
 			metric.WithAttributes(
 				attribute.String(attrProvider, name),
 				attribute.String(attrResource, rl.Resource),

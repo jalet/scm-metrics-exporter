@@ -48,7 +48,11 @@ type Options struct {
 	// RepoScope, when set with GitHub App auth, restricts the minted installation token to
 	// that single repository (least privilege). Used by run-once per-repo collection; it
 	// has no effect with PAT auth.
-	RepoScope        string
+	RepoScope string
+	// CollectWorkflows enables recent GitHub Actions workflow-run collection in SnapshotRepo.
+	CollectWorkflows bool
+	// WorkflowLookback bounds how far back workflow runs are counted (default 7 days).
+	WorkflowLookback time.Duration
 	CodeScanningTool string // SARIF tool filter; empty counts all tools
 	BaseURL          string // REST base URL override (must accept a trailing slash)
 	GraphQLURL       string // GraphQL endpoint override
@@ -57,12 +61,17 @@ type Options struct {
 
 // Provider polls a GitHub organization or user for review items and security findings.
 type Provider struct {
-	rest       *gh.Client
-	graphql    *graphqlClient
-	toolName   string
-	targetType string
-	maxPages   int
+	rest             *gh.Client
+	graphql          *graphqlClient
+	toolName         string
+	targetType       string
+	maxPages         int
+	collectWorkflows bool
+	workflowLookback time.Duration
 }
+
+// defaultWorkflowLookback bounds recent workflow-run collection when unset.
+const defaultWorkflowLookback = 7 * 24 * time.Hour
 
 var (
 	_ provider.Provider        = (*Provider)(nil)
@@ -97,12 +106,19 @@ func New(opts Options) (*Provider, error) {
 		targetType = targetOrg
 	}
 
+	lookback := opts.WorkflowLookback
+	if lookback <= 0 {
+		lookback = defaultWorkflowLookback
+	}
+
 	return &Provider{
-		rest:       rest,
-		graphql:    &graphqlClient{httpClient: httpClient, endpoint: endpoint},
-		toolName:   opts.CodeScanningTool,
-		targetType: targetType,
-		maxPages:   defaultMaxPages,
+		rest:             rest,
+		graphql:          &graphqlClient{httpClient: httpClient, endpoint: endpoint},
+		toolName:         opts.CodeScanningTool,
+		targetType:       targetType,
+		maxPages:         defaultMaxPages,
+		collectWorkflows: opts.CollectWorkflows,
+		workflowLookback: lookback,
 	}, nil
 }
 
@@ -202,6 +218,17 @@ func (p *Provider) SnapshotRepo(ctx context.Context, owner, repo string) (provid
 		zlog.Warn().Err(ssErr).Str("provider", "github").Str("source", provider.SourceSecretScanning).Str("repo", owner+"/"+repo).
 			Msg("source failed; snapshot is partial")
 		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceSecretScanning})
+	}
+	// Workflow-run collection is opt-in and supplementary: never fatal, and a failure is a
+	// partial (recorded) source error, not a lost snapshot.
+	if p.collectWorkflows {
+		if stats, wfErr := p.collectWorkflowRuns(ctx, owner, repo); wfErr != nil {
+			zlog.Warn().Err(wfErr).Str("provider", "github").Str("source", provider.SourceWorkflows).Str("repo", owner+"/"+repo).
+				Msg("source failed; snapshot is partial")
+			snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceWorkflows})
+		} else if len(snap.Repos) > 0 {
+			snap.Repos[0].WorkflowRuns = stats
+		}
 	}
 	zlog.Debug().Str("provider", "github").Str("repo", owner+"/"+repo).
 		Int("repos", len(snap.Repos)).Int("rate_limits", len(snap.RateLimits)).Msg("github repo snapshot assembled")

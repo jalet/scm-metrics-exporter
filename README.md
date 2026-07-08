@@ -33,6 +33,7 @@ credentials and rate budgets.
 | `scm.api.rate_limit_remaining` | gauge | provider, resource | `scm_api_rate_limit_remaining` |
 | `scm.exporter.scrape_errors` | counter | provider, source | `scm_exporter_scrape_errors_total` |
 | `scm.repo.info` | gauge | provider, repo, visibility, archived, branch_protected, dependabot_enabled | `scm_repo_info` |
+| `scm.workflow_runs.recent` | gauge | provider, repo, workflow, conclusion | `scm_workflow_runs_recent` |
 
 `severity` is one of `critical`, `high`, `medium`, `low`, or `unknown` (GitHub
 secret-scanning alerts carry no severity). `category` is one of `dependency`,
@@ -48,6 +49,12 @@ branch has a protection rule, and `dependabot_enabled` means automated
 dependency-vulnerability alerting is on (GitHub Dependabot alerts, or GitLab dependency
 scanning). Some fields are admin-gated, so a token without the required access may report
 them as `false`.
+
+`scm_workflow_runs_recent` (GitHub only, opt-in via `spec.collectWorkflows`) counts recent
+GitHub Actions runs in a lookback window (`spec.workflowLookback`, default 7d) by `workflow`
+and `conclusion` (`success`, `failure`, `cancelled`, ...); runs still in progress are
+skipped. It is a gauge because collection is run-once per cycle: compute a failure ratio in
+the query, e.g. `failure / (success+failure)`.
 
 - **GitHub** captures posture from the existing GraphQL repo page at no extra API cost.
 - **GitLab** captures posture for **group** targets via a GraphQL sweep of the group's

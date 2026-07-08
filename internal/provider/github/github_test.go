@@ -335,6 +335,48 @@ func TestSnapshotRepo(t *testing.T) {
 	}
 }
 
+func TestSnapshotRepoWorkflows(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(repoGraphQL))
+		case r.URL.Path == "/repos/acme/widget/code-scanning/alerts":
+			_, _ = w.Write([]byte(`[]`))
+		case r.URL.Path == "/repos/acme/widget/secret-scanning/alerts":
+			_, _ = w.Write([]byte(`[]`))
+		case r.URL.Path == "/repos/acme/widget/actions/runs":
+			_, _ = w.Write([]byte(`{"total_count":5,"workflow_runs":[
+				{"name":"ci","conclusion":"success"},
+				{"name":"ci","conclusion":"failure"},
+				{"name":"ci","conclusion":"success"},
+				{"name":"release","conclusion":"success"},
+				{"name":"lint","status":"in_progress","conclusion":null}
+			]}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := mustNewProvider(t, srv, Options{CollectWorkflows: true}).SnapshotRepo(context.Background(), "acme", "widget")
+	if err != nil {
+		t.Fatalf("SnapshotRepo: %v", err)
+	}
+	if len(got.Repos) != 1 {
+		t.Fatalf("repos = %+v, want 1", got.Repos)
+	}
+	want := []provider.WorkflowRunStat{
+		{Workflow: "ci", Conclusion: "failure", Count: 1},
+		{Workflow: "ci", Conclusion: "success", Count: 2},
+		{Workflow: "release", Conclusion: "success", Count: 1},
+	}
+	if diff := cmp.Diff(want, got.Repos[0].WorkflowRuns); diff != "" {
+		t.Errorf("workflow runs mismatch (-want +got):\n%s\n(in-progress runs must be skipped)", diff)
+	}
+}
+
 func TestSnapshotRepoGraphQLFailureIsPartial(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

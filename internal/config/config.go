@@ -51,6 +51,8 @@ type GitHubConfig struct {
 	AppInstallationID int64
 	AppPrivateKeyPath string
 	CodeScanningTool  string
+	CollectWorkflows  bool
+	WorkflowLookback  time.Duration
 }
 
 // GitLabConfig holds GitLab provider settings. TargetType selects group (default) or
@@ -83,11 +85,15 @@ func Load(providerName string) (Config, error) {
 			Token:             os.Getenv("GITHUB_TOKEN"),
 			AppPrivateKeyPath: os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"),
 			CodeScanningTool:  os.Getenv("GITHUB_CODE_SCANNING_TOOL"),
+			CollectWorkflows:  os.Getenv("GITHUB_COLLECT_WORKFLOWS") == "true",
 		}
 		if cfg.GitHub.AppID, err = getenvInt64("GITHUB_APP_ID"); err != nil {
 			return Config{}, err
 		}
 		if cfg.GitHub.AppInstallationID, err = getenvInt64("GITHUB_APP_INSTALLATION_ID"); err != nil {
+			return Config{}, err
+		}
+		if cfg.GitHub.WorkflowLookback, err = getenvDuration("GITHUB_WORKFLOW_LOOKBACK", 0); err != nil {
 			return Config{}, err
 		}
 		if err := cfg.GitHub.validate(); err != nil {

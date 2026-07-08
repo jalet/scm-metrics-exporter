@@ -55,6 +55,18 @@ type GitHubMetricsExporterSpec struct {
 	// (for example "CodeQL"). Empty counts all tools.
 	// +optional
 	CodeScanningTool string `json:"codeScanningTool,omitempty"`
+
+	// CollectWorkflows enables recent GitHub Actions workflow-run metrics
+	// (scm_workflow_runs_recent), tallied per collection Job. Off by default because it
+	// adds an API call per repository and extra series cardinality.
+	// +optional
+	CollectWorkflows bool `json:"collectWorkflows,omitempty"`
+
+	// WorkflowLookback bounds how far back workflow runs are counted (used when
+	// CollectWorkflows is true).
+	// +kubebuilder:default="168h"
+	// +optional
+	WorkflowLookback metav1.Duration `json:"workflowLookback,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -160,6 +160,12 @@ spec:
                   CodeScanningTool optionally filters code scanning alerts to one SARIF tool
                   (for example "CodeQL"). Empty counts all tools.
                 type: string
+              collectWorkflows:
+                description: |-
+                  CollectWorkflows enables recent GitHub Actions workflow-run metrics
+                  (scm_workflow_runs_recent), tallied per collection Job. Off by default because it
+                  adds an API call per repository and extra series cardinality.
+                type: boolean
               credentialsSecret:
                 description: |-
                   CredentialsSecret names the Secret in the CR's namespace holding the provider
@@ -299,6 +305,12 @@ spec:
                 description: |-
                   User is the GitHub user account to poll (targetType "user"). Code scanning is
                   gathered per-repository for a user (GitHub has no org-scoped user endpoint).
+                type: string
+              workflowLookback:
+                default: 168h
+                description: |-
+                  WorkflowLookback bounds how far back workflow runs are counted (used when
+                  CollectWorkflows is true).
                 type: string
             required:
             - authMode

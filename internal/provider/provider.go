@@ -73,6 +73,21 @@ type RepoMetrics struct {
 	// Posture is the repository's security-posture snapshot, or nil when the provider
 	// did not capture it (feeds the scm.repo.info gauge). It is treated as immutable.
 	Posture *RepoPosture
+	// WorkflowRuns tallies recent CI workflow-run outcomes (GitHub Actions) within a
+	// lookback window. It is populated only when workflow collection is enabled, and feeds
+	// the scm.workflow_runs.recent gauge.
+	WorkflowRuns []WorkflowRunStat
+}
+
+// WorkflowRunStat is the count of recent CI runs for one workflow and conclusion (for
+// example workflow "ci", conclusion "failure", count 3).
+type WorkflowRunStat struct {
+	// Workflow is the workflow name (GitHub Actions workflow / run name).
+	Workflow string
+	// Conclusion is the run conclusion, lowercased (success, failure, cancelled, ...).
+	Conclusion string
+	// Count is the number of runs with this (workflow, conclusion) in the lookback window.
+	Count int
 }
 
 // RepoPosture is a repository's security-configuration snapshot. Some fields are
@@ -144,6 +159,7 @@ const (
 	SourceGraphQL        = "graphql"
 	SourceREST           = "rest"
 	SourceSecretScanning = "secret_scanning"
+	SourceWorkflows      = "workflows"
 )
 
 // API resources, emitted on the "resource" attribute of
