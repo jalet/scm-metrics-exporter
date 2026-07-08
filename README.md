@@ -51,6 +51,14 @@ and the exporter Deployments it creates override the command to `/exporter`.
 The chart is published as an OCI artifact. It installs the operator, its RBAC, and
 the CRDs (templated and gated by `crds.enabled` / `crds.keep`).
 
+**Prerequisite: [cert-manager](https://cert-manager.io).** The chart ships an always-on
+validating admission webhook that rejects a CR at apply time when its `credentialsSecret`
+is missing or lacks the referenced key (the one cross-object check CEL cannot do).
+cert-manager issues the webhook serving certificate (a self-signed `Issuer` + `Certificate`,
+with the CA injected into the `ValidatingWebhookConfiguration`). The webhook uses
+`failurePolicy: Fail` scoped to `scm.jalet.io` resources, so if the operator/webhook is
+down, only scm CR writes are blocked -- never other cluster writes.
+
 ```sh
 helm install scm-metrics-exporter \
   oci://ghcr.io/jalet/charts/scm-metrics-exporter \

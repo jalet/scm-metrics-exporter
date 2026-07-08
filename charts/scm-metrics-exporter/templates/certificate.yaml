@@ -1,0 +1,30 @@
+{{/*
+The admission webhook is always on, so cert-manager is a required prerequisite: it
+provisions the webhook serving certificate from a self-signed Issuer, and injects the CA
+into the ValidatingWebhookConfiguration (see webhook.yaml).
+*/}}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "scm-metrics-exporter.fullname" . }}-selfsigned
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "scm-metrics-exporter.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "scm-metrics-exporter.fullname" . }}-serving-cert
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "scm-metrics-exporter.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+    - {{ include "scm-metrics-exporter.fullname" . }}-webhook.{{ .Release.Namespace }}.svc
+    - {{ include "scm-metrics-exporter.fullname" . }}-webhook.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: {{ include "scm-metrics-exporter.fullname" . }}-selfsigned
+  secretName: {{ include "scm-metrics-exporter.fullname" . }}-webhook-cert

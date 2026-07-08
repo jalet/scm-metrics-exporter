@@ -9,6 +9,7 @@ package main
 import (
 	"flag"
 	"os"
+	"path/filepath"
 
 	// Load all in-cluster / kubeconfig auth plugins.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -20,10 +21,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	scmv1alpha1 "github.com/jalet/scm-metrics-exporter/api/v1alpha1"
 	"github.com/jalet/scm-metrics-exporter/internal/controller"
 )
+
+// defaultWebhookCertDir is where controller-runtime looks for the webhook serving cert;
+// the Helm chart mounts the cert-manager-issued Secret here.
+const defaultWebhookCertDir = "/tmp/k8s-webhook-server/serving-certs"
 
 var (
 	scheme   = runtime.NewScheme()
@@ -47,12 +53,18 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOpts)))
 
+	certDir := os.Getenv("WEBHOOK_CERT_DIR")
+	if certDir == "" {
+		certDir = defaultWebhookCertDir
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "scm-metrics-exporter.jalet.io",
+		WebhookServer:          webhook.NewServer(webhook.Options{CertDir: certDir}),
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -77,6 +89,21 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "GitLabMetricsExporter")
 		os.Exit(1)
+	}
+
+	// Admission webhooks are always-on when serving certs are present (the Helm chart
+	// mounts the cert-manager-issued Secret). Without certs -- local runs, or envtest
+	// without WebhookInstallOptions -- registration is skipped by cert presence (not a
+	// user toggle) so the same binary still starts.
+	//nolint:gosec // certDir is operator-configured (WEBHOOK_CERT_DIR), not attacker input; this only Stats the file.
+	if _, statErr := os.Stat(filepath.Join(certDir, "tls.crt")); statErr == nil {
+		if err := scmv1alpha1.SetupWebhooksWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to set up admission webhooks")
+			os.Exit(1)
+		}
+		setupLog.Info("admission webhooks registered", "certDir", certDir)
+	} else {
+		setupLog.Info("webhook serving certs not found; admission webhooks disabled", "certDir", certDir)
 	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

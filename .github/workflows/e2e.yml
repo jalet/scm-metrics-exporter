@@ -33,6 +33,11 @@ jobs:
       - name: Load image into kind
         run: kind load docker-image scm-metrics-exporter:e2e --name chart-testing
 
+      - name: Install cert-manager
+        run: |
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
+          kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=180s
+
       - name: Install chart-testing
         uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.8.0
 
@@ -43,3 +48,27 @@ jobs:
         run: |
           ct install --charts charts/scm-metrics-exporter \
             --helm-extra-set-args "--set image.repository=scm-metrics-exporter --set image.tag=e2e --set image.pullPolicy=Never"
+
+      - name: Webhook rejects a CR with a missing Secret
+        run: |
+          helm install scm charts/scm-metrics-exporter -n scm-system --create-namespace \
+            --set image.repository=scm-metrics-exporter --set image.tag=e2e --set image.pullPolicy=Never \
+            --wait --timeout 3m
+          cat > /tmp/bad-cr.yaml <<'EOF'
+          apiVersion: scm.jalet.io/v1alpha1
+          kind: GitHubMetricsExporter
+          metadata:
+            name: bad
+            namespace: scm-system
+          spec:
+            org: acme
+            authMode: token
+            tokenKey: token
+            credentialsSecret:
+              name: does-not-exist
+          EOF
+          if kubectl apply -f /tmp/bad-cr.yaml; then
+            echo "::error::bad CR was admitted; the validating webhook did not reject it"
+            exit 1
+          fi
+          echo "webhook correctly rejected the CR referencing a missing Secret"
