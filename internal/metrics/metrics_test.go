@@ -129,7 +129,7 @@ func TestSetupSelectsExporterAndShutsDown(t *testing.T) {
 	// autoexport reader selection, MeterProvider wiring, and shutdown path.
 	t.Setenv("OTEL_METRICS_EXPORTER", "none")
 
-	mp, record, err := Setup(context.Background(), fakeSource{})
+	mp, record, err := Setup(context.Background(), fakeSource{}, "test")
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
