@@ -189,6 +189,42 @@ func TestSnapshotProjectsErrorIsPartial(t *testing.T) {
 	}
 }
 
+func TestSnapshotUserTarget(t *testing.T) {
+	graphqlCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v4/users/alice/projects":
+			w.Header().Set("RateLimit-Remaining", "59")
+			_, _ = w.Write([]byte(`[{"id":10,"path_with_namespace":"alice/proj"}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v4/projects/10/merge_requests":
+			w.Header().Set("RateLimit-Remaining", "58")
+			_, _ = w.Write([]byte(`[{},{}]`)) // two open MRs
+		case r.Method == http.MethodPost && r.URL.Path == graphqlPath:
+			graphqlCalled = true // GitLab has no user-scoped vulnerabilities API; must be skipped
+			t.Error("graphql must not be called for a user target")
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := mustNewProvider(t, srv, Options{TargetType: "user"}).Snapshot(context.Background(), "alice")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if graphqlCalled {
+		t.Fatal("graphql was queried for a user target")
+	}
+	if len(got.SourceErrors) != 0 {
+		t.Fatalf("SourceErrors = %+v, want none for a user target", got.SourceErrors)
+	}
+	want := []provider.RepoMetrics{{Name: "alice/proj", OpenReviewItems: 2}}
+	if diff := cmp.Diff(want, got.Repos); diff != "" {
+		t.Errorf("repos mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestNewAuthSelection(t *testing.T) {
 	if _, err := New(Options{Token: "glpat-x"}); err != nil {
 		t.Fatalf("token auth: %v", err)

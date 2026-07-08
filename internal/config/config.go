@@ -12,6 +12,15 @@ import (
 
 const defaultPollInterval = 5 * time.Minute
 
+// Target types. GitHub polls an organization (default) or a user; GitLab polls a
+// group (default) or a user. The type selects which target field is required and
+// which one Target() returns.
+const (
+	TargetOrg   = "org"
+	TargetUser  = "user"
+	TargetGroup = "group"
+)
+
 // Config holds the exporter's runtime settings. Exporter-backend selection
 // (OTEL_METRICS_EXPORTER and friends) is read by the OpenTelemetry SDK, not here.
 type Config struct {
@@ -21,9 +30,12 @@ type Config struct {
 	GitLab       GitLabConfig
 }
 
-// GitHubConfig holds GitHub provider settings.
+// GitHubConfig holds GitHub provider settings. TargetType selects org (default) or
+// user; exactly the matching field (Org or User) must be set.
 type GitHubConfig struct {
+	TargetType        string
 	Org               string
+	User              string
 	Token             string
 	AppID             int64
 	AppInstallationID int64
@@ -31,11 +43,14 @@ type GitHubConfig struct {
 	CodeScanningTool  string
 }
 
-// GitLabConfig holds GitLab provider settings.
+// GitLabConfig holds GitLab provider settings. TargetType selects group (default) or
+// user; exactly the matching field (Group or User) must be set.
 type GitLabConfig struct {
-	Group   string
-	Token   string
-	BaseURL string
+	TargetType string
+	Group      string
+	User       string
+	Token      string
+	BaseURL    string
 }
 
 // Load reads and validates the configuration for the given provider. It fails fast
@@ -51,7 +66,9 @@ func Load(providerName string) (Config, error) {
 	switch providerName {
 	case "github":
 		cfg.GitHub = GitHubConfig{
+			TargetType:        getenvDefault("GITHUB_TARGET_TYPE", TargetOrg),
 			Org:               os.Getenv("GITHUB_ORG"),
+			User:              os.Getenv("GITHUB_USER"),
 			Token:             os.Getenv("GITHUB_TOKEN"),
 			AppPrivateKeyPath: os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"),
 			CodeScanningTool:  os.Getenv("GITHUB_CODE_SCANNING_TOOL"),
@@ -67,9 +84,11 @@ func Load(providerName string) (Config, error) {
 		}
 	case "gitlab":
 		cfg.GitLab = GitLabConfig{
-			Group:   os.Getenv("GITLAB_GROUP"),
-			Token:   os.Getenv("GITLAB_TOKEN"),
-			BaseURL: os.Getenv("GITLAB_URL"),
+			TargetType: getenvDefault("GITLAB_TARGET_TYPE", TargetGroup),
+			Group:      os.Getenv("GITLAB_GROUP"),
+			User:       os.Getenv("GITLAB_USER"),
+			Token:      os.Getenv("GITLAB_TOKEN"),
+			BaseURL:    os.Getenv("GITLAB_URL"),
 		}
 		if err := cfg.GitLab.validate(); err != nil {
 			return Config{}, err
@@ -80,20 +99,39 @@ func Load(providerName string) (Config, error) {
 	return cfg, nil
 }
 
-// Target returns the poll target (organization or group) for the selected provider.
+// Target returns the poll target (organization, group, or user login) for the selected
+// provider and target type.
 func (c Config) Target() string {
-	if c.Provider == "gitlab" {
+	switch c.Provider {
+	case "gitlab":
+		if c.GitLab.TargetType == TargetUser {
+			return c.GitLab.User
+		}
 		return c.GitLab.Group
+	default:
+		if c.GitHub.TargetType == TargetUser {
+			return c.GitHub.User
+		}
+		return c.GitHub.Org
 	}
-	return c.GitHub.Org
 }
 
-// validate enforces GITHUB_ORG plus exactly one usable auth method (App trio takes
-// precedence over a PAT).
+// validate enforces the target field for the chosen type plus exactly one usable auth
+// method (App trio takes precedence over a PAT).
 func (c GitHubConfig) validate() error {
-	if c.Org == "" {
-		return errors.New("config: GITHUB_ORG is required")
+	switch c.TargetType {
+	case TargetOrg:
+		if c.Org == "" {
+			return errors.New("config: GITHUB_ORG is required (GITHUB_TARGET_TYPE=org)")
+		}
+	case TargetUser:
+		if c.User == "" {
+			return errors.New("config: GITHUB_USER is required (GITHUB_TARGET_TYPE=user)")
+		}
+	default:
+		return fmt.Errorf("config: invalid GITHUB_TARGET_TYPE %q (want org or user)", c.TargetType)
 	}
+
 	appComplete := c.AppID != 0 && c.AppInstallationID != 0 && c.AppPrivateKeyPath != ""
 	appPartial := !appComplete && (c.AppID != 0 || c.AppInstallationID != 0 || c.AppPrivateKeyPath != "")
 	switch {
@@ -109,13 +147,29 @@ func (c GitHubConfig) validate() error {
 }
 
 func (c GitLabConfig) validate() error {
-	if c.Group == "" {
-		return errors.New("config: GITLAB_GROUP is required")
+	switch c.TargetType {
+	case TargetGroup:
+		if c.Group == "" {
+			return errors.New("config: GITLAB_GROUP is required (GITLAB_TARGET_TYPE=group)")
+		}
+	case TargetUser:
+		if c.User == "" {
+			return errors.New("config: GITLAB_USER is required (GITLAB_TARGET_TYPE=user)")
+		}
+	default:
+		return fmt.Errorf("config: invalid GITLAB_TARGET_TYPE %q (want group or user)", c.TargetType)
 	}
 	if c.Token == "" {
 		return errors.New("config: GITLAB_TOKEN is required")
 	}
 	return nil
+}
+
+func getenvDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 func getenvInt64(key string) (int64, error) {

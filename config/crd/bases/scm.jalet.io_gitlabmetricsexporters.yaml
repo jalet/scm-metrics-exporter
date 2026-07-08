@@ -17,8 +17,14 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.targetType
+      name: Type
+      type: string
     - jsonPath: .spec.group
       name: Group
+      type: string
+    - jsonPath: .spec.user
+      name: User
       type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
       name: Ready
@@ -89,8 +95,7 @@ spec:
                     type: string
                 type: object
               group:
-                description: Group is the GitLab group to poll.
-                minLength: 1
+                description: Group is the GitLab group to poll (targetType "group").
                 type: string
               image:
                 description: |-
@@ -171,16 +176,36 @@ spec:
                   ServiceMonitor, when true, makes the operator create a Prometheus Operator
                   ServiceMonitor for the exporter (requires the ServiceMonitor CRD present).
                 type: boolean
+              targetType:
+                default: group
+                description: |-
+                  TargetType selects whether Group or User is polled. User targets yield merge
+                  request counts only; security findings are unavailable (GitLab vulnerabilities
+                  are Ultimate/group-scoped).
+                enum:
+                - group
+                - user
+                type: string
               tokenKey:
                 description: TokenKey is the CredentialsSecret key holding the GitLab
                   access token.
                 minLength: 1
                 type: string
+              user:
+                description: User is the GitLab user namespace to poll (targetType
+                  "user").
+                type: string
             required:
             - credentialsSecret
-            - group
             - tokenKey
             type: object
+            x-kubernetes-validations:
+            - message: targetType 'group' requires group
+              rule: self.targetType != 'group' || (has(self.group) && size(self.group)
+                > 0)
+            - message: targetType 'user' requires user
+              rule: self.targetType != 'user' || (has(self.user) && size(self.user)
+                > 0)
           status:
             description: ExporterStatus is the shared status for provider CRDs.
             properties:

@@ -25,6 +25,12 @@ const (
 	defaultBaseURL  = "https://gitlab.com"
 	apiV4           = "/api/v4"
 	defaultMaxPages = 100
+
+	// Target types. A group uses group-scoped project/MR/vulnerability endpoints; a
+	// user uses /users/{id}/projects with per-project MR counts and has no
+	// vulnerabilities API (Ultimate/group-only), so findings are skipped for users.
+	targetGroup = "group"
+	targetUser  = "user"
 )
 
 // Options configures the GitLab provider. Token is required. BaseURL points at a
@@ -35,6 +41,7 @@ const (
 // auth and retry transport.
 type Options struct {
 	Token           string
+	TargetType      string // "group" (default) or "user"
 	BaseURL         string
 	GraphQLURL      string
 	Bearer          bool
@@ -42,11 +49,12 @@ type Options struct {
 	HTTPClient      *http.Client
 }
 
-// Provider polls a GitLab group for review items and security findings.
+// Provider polls a GitLab group or user for review items and security findings.
 type Provider struct {
-	rest     *restClient
-	graphql  *graphqlClient
-	maxPages int
+	rest       *restClient
+	graphql    *graphqlClient
+	targetType string
+	maxPages   int
 }
 
 var _ provider.Provider = (*Provider)(nil)
@@ -67,26 +75,46 @@ func New(opts Options) (*Provider, error) {
 	if gqlEndpoint == "" {
 		gqlEndpoint = apiBase + "/graphql"
 	}
+	targetType := opts.TargetType
+	if targetType == "" {
+		targetType = targetGroup
+	}
 	return &Provider{
-		rest:     &restClient{httpClient: httpClient, apiBase: apiBase, includeArchived: opts.IncludeArchived},
-		graphql:  &graphqlClient{httpClient: httpClient, endpoint: gqlEndpoint},
-		maxPages: defaultMaxPages,
+		rest:       &restClient{httpClient: httpClient, apiBase: apiBase, includeArchived: opts.IncludeArchived},
+		graphql:    &graphqlClient{httpClient: httpClient, endpoint: gqlEndpoint},
+		targetType: targetType,
+		maxPages:   defaultMaxPages,
 	}, nil
 }
 
 // Name identifies the provider on the "provider" metric attribute.
 func (p *Provider) Name() string { return "gitlab" }
 
-// Snapshot polls the group. It merges the REST result (projects + open MR counts) with
-// the GraphQL result (open findings). A single failing source is recorded in
-// SourceErrors and yields a partial snapshot; only when both sources fail does Snapshot
-// return an error.
-func (p *Provider) Snapshot(ctx context.Context, group string) (provider.Snapshot, error) {
-	rest, restErr := p.collectREST(ctx, group)
-	vuln, vulnErr := p.collectVulnerabilities(ctx, group)
+// Snapshot polls the target (group or user). For a group it merges the REST result
+// (projects + open MR counts) with the GraphQL findings; a single failing source yields a
+// partial snapshot and only a dual failure returns an error. For a user it returns MR
+// counts only: GitLab has no user-scoped vulnerabilities API (Ultimate/group-only), so the
+// findings call is skipped rather than emitting a recurring SourceError or a false zero.
+func (p *Provider) Snapshot(ctx context.Context, target string) (provider.Snapshot, error) {
+	rest, restErr := p.collectREST(ctx, target)
+
+	if p.targetType == targetUser {
+		if restErr != nil {
+			return provider.Snapshot{}, fmt.Errorf("gitlab: rest failed for user %q: %w", target, restErr)
+		}
+		snap := provider.Snapshot{Repos: mergeRepos(rest.projects, nil)}
+		if rest.rateKnown {
+			snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceREST, Remaining: rest.rate})
+		}
+		zlog.Debug().Str("provider", "gitlab").Str("target", target).Int("repos", len(snap.Repos)).
+			Msg("gitlab user snapshot assembled (MR counts only; findings unsupported for users)")
+		return snap, nil
+	}
+
+	vuln, vulnErr := p.collectVulnerabilities(ctx, target)
 
 	if restErr != nil && vulnErr != nil {
-		return provider.Snapshot{}, fmt.Errorf("gitlab: all sources failed for %q: %w", group, errors.Join(restErr, vulnErr))
+		return provider.Snapshot{}, fmt.Errorf("gitlab: all sources failed for %q: %w", target, errors.Join(restErr, vulnErr))
 	}
 
 	snap := provider.Snapshot{Repos: mergeRepos(rest.projects, vuln.findings)}
@@ -97,16 +125,16 @@ func (p *Provider) Snapshot(ctx context.Context, group string) (provider.Snapsho
 		snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceGraphQL, Remaining: vuln.rate})
 	}
 	if restErr != nil {
-		zlog.Warn().Err(restErr).Str("provider", "gitlab").Str("source", provider.SourceREST).Str("target", group).
+		zlog.Warn().Err(restErr).Str("provider", "gitlab").Str("source", provider.SourceREST).Str("target", target).
 			Msg("source failed; snapshot is partial")
 		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceREST})
 	}
 	if vulnErr != nil {
-		zlog.Warn().Err(vulnErr).Str("provider", "gitlab").Str("source", provider.SourceGraphQL).Str("target", group).
+		zlog.Warn().Err(vulnErr).Str("provider", "gitlab").Str("source", provider.SourceGraphQL).Str("target", target).
 			Msg("source failed; snapshot is partial")
 		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceGraphQL})
 	}
-	zlog.Debug().Str("provider", "gitlab").Str("target", group).
+	zlog.Debug().Str("provider", "gitlab").Str("target", target).
 		Int("repos", len(snap.Repos)).Int("rate_limits", len(snap.RateLimits)).
 		Msg("gitlab snapshot assembled")
 	return snap, nil

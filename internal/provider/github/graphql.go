@@ -14,10 +14,12 @@ import (
 	"github.com/jalet/scm-metrics-exporter/internal/provider"
 )
 
-// orgMetricsQuery batches open PR counts and Dependabot alerts per page of repos,
-// and reads the remaining GraphQL rate-limit quota from the same request.
-const orgMetricsQuery = `query OrgMetrics($org: String!, $cursor: String) {
-  organization(login: $org) {
+// ownerMetricsQuery batches open PR counts and Dependabot alerts per page of repos,
+// and reads the remaining GraphQL rate-limit quota from the same request. It uses
+// repositoryOwner(login:), which resolves either an organization or a user, so one
+// query serves both target types.
+const ownerMetricsQuery = `query OwnerMetrics($login: String!, $cursor: String) {
+  repositoryOwner(login: $login) {
     repositories(first: 50, after: $cursor) {
       pageInfo { hasNextPage endCursor }
       nodes {
@@ -37,10 +39,10 @@ type graphqlClient struct {
 	endpoint   string
 }
 
-// graphqlResponse mirrors the JSON envelope of orgMetricsQuery.
+// graphqlResponse mirrors the JSON envelope of ownerMetricsQuery.
 type graphqlResponse struct {
 	Data struct {
-		Organization struct {
+		RepositoryOwner struct {
 			Repositories struct {
 				PageInfo struct {
 					HasNextPage bool   `json:"hasNextPage"`
@@ -60,7 +62,7 @@ type graphqlResponse struct {
 					} `json:"vulnerabilityAlerts"`
 				} `json:"nodes"`
 			} `json:"repositories"`
-		} `json:"organization"`
+		} `json:"repositoryOwner"`
 		RateLimit struct {
 			Remaining int64 `json:"remaining"`
 		} `json:"rateLimit"`
@@ -87,10 +89,10 @@ type graphqlResult struct {
 
 // do executes the query for one page. A non-2xx status or a transport error is
 // returned as an error; GraphQL-level errors are surfaced via graphqlResponse.Errors.
-func (c *graphqlClient) do(ctx context.Context, org string, cursor *string) (*graphqlResponse, error) {
+func (c *graphqlClient) do(ctx context.Context, owner string, cursor *string) (*graphqlResponse, error) {
 	payload, err := json.Marshal(map[string]any{
-		"query":     orgMetricsQuery,
-		"variables": map[string]any{"org": org, "cursor": cursor},
+		"query":     ownerMetricsQuery,
+		"variables": map[string]any{"login": owner, "cursor": cursor},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("github graphql: marshal request: %w", err)
@@ -123,14 +125,14 @@ func (c *graphqlClient) do(ctx context.Context, org string, cursor *string) (*gr
 	return &gr, nil
 }
 
-// collectGraphQL pages through the organization's repositories, accumulating open PR
-// counts and Dependabot findings and the latest rate-limit reading. On error it
-// returns whatever was collected so far.
-func (p *Provider) collectGraphQL(ctx context.Context, org string) (graphqlResult, error) {
+// collectGraphQL pages through the owner's repositories (organization or user),
+// accumulating open PR counts and Dependabot findings and the latest rate-limit
+// reading. On error it returns whatever was collected so far.
+func (p *Provider) collectGraphQL(ctx context.Context, owner string) (graphqlResult, error) {
 	var res graphqlResult
 	var cursor *string
 	for page := 0; page < p.maxPages; page++ {
-		gr, err := p.graphql.do(ctx, org, cursor)
+		gr, err := p.graphql.do(ctx, owner, cursor)
 		if err != nil {
 			return res, err
 		}
@@ -142,26 +144,26 @@ func (p *Provider) collectGraphQL(ctx context.Context, org string) (graphqlResul
 		res.rateKnown = true
 		pageRepos := mapGraphQLRepos(gr)
 		res.repos = append(res.repos, pageRepos...)
-		zlog.Debug().Str("provider", "github").Str("source", "graphql").Str("org", org).
+		zlog.Debug().Str("provider", "github").Str("source", "graphql").Str("owner", owner).
 			Int("page", page).Int("repos_in_page", len(pageRepos)).Int("repos_total", len(res.repos)).
 			Int64("rate_remaining", res.rateRemaining).Msg("fetched repositories page")
 
-		pi := gr.Data.Organization.Repositories.PageInfo
+		pi := gr.Data.RepositoryOwner.Repositories.PageInfo
 		if !pi.HasNextPage {
-			zlog.Debug().Str("provider", "github").Str("source", "graphql").Str("org", org).
+			zlog.Debug().Str("provider", "github").Str("source", "graphql").Str("owner", owner).
 				Int("repos", len(res.repos)).Int("pages", page+1).Msg("graphql collection complete")
 			return res, nil
 		}
 		cursor = &pi.EndCursor
 	}
-	zlog.Warn().Str("org", org).Int("maxPages", p.maxPages).Msg("github graphql pagination cap reached")
+	zlog.Warn().Str("owner", owner).Int("maxPages", p.maxPages).Msg("github graphql pagination cap reached")
 	return res, nil
 }
 
 // mapGraphQLRepos maps a decoded response page to repos. It never panics on
 // arbitrary input (fuzz target).
 func mapGraphQLRepos(gr *graphqlResponse) []graphqlRepo {
-	nodes := gr.Data.Organization.Repositories.Nodes
+	nodes := gr.Data.RepositoryOwner.Repositories.Nodes
 	repos := make([]graphqlRepo, 0, len(nodes))
 	for _, n := range nodes {
 		repo := graphqlRepo{name: n.Name, openPRs: n.PullRequests.TotalCount}

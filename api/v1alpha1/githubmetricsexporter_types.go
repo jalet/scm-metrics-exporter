@@ -7,14 +7,27 @@ import (
 
 // GitHubMetricsExporterSpec configures a GitHub metrics exporter.
 //
+// +kubebuilder:validation:XValidation:rule="self.targetType != 'org' || (has(self.org) && size(self.org) > 0)",message="targetType 'org' requires org"
+// +kubebuilder:validation:XValidation:rule="self.targetType != 'user' || (has(self.user) && size(self.user) > 0)",message="targetType 'user' requires user"
 // +kubebuilder:validation:XValidation:rule="self.authMode != 'app' || (has(self.appID) && self.appID > 0 && has(self.appInstallationID) && self.appInstallationID > 0 && has(self.appPrivateKeyKey) && size(self.appPrivateKeyKey) > 0)",message="authMode 'app' requires appID, appInstallationID, and appPrivateKeyKey"
 // +kubebuilder:validation:XValidation:rule="self.authMode != 'token' || (has(self.tokenKey) && size(self.tokenKey) > 0)",message="authMode 'token' requires tokenKey"
 type GitHubMetricsExporterSpec struct {
 	ExporterSpec `json:",inline"`
 
-	// Org is the GitHub organization to poll.
-	// +kubebuilder:validation:MinLength=1
-	Org string `json:"org"`
+	// TargetType selects whether Org or User is polled.
+	// +kubebuilder:validation:Enum=org;user
+	// +kubebuilder:default=org
+	// +optional
+	TargetType string `json:"targetType,omitempty"`
+
+	// Org is the GitHub organization to poll (targetType "org").
+	// +optional
+	Org string `json:"org,omitempty"`
+
+	// User is the GitHub user account to poll (targetType "user"). Code scanning is
+	// gathered per-repository for a user (GitHub has no org-scoped user endpoint).
+	// +optional
+	User string `json:"user,omitempty"`
 
 	// AuthMode selects the credential type held in CredentialsSecret.
 	// +kubebuilder:validation:Enum=token;app
@@ -47,7 +60,9 @@ type GitHubMetricsExporterSpec struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=ghme
+// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.targetType`
 // +kubebuilder:printcolumn:name="Org",type=string,JSONPath=`.spec.org`
+// +kubebuilder:printcolumn:name="User",type=string,JSONPath=`.spec.user`
 // +kubebuilder:printcolumn:name="Auth",type=string,JSONPath=`.spec.authMode`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

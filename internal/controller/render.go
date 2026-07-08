@@ -138,8 +138,11 @@ func githubDeployment(cr *scmv1alpha1.GitHubMetricsExporter, image string) *apps
 }
 
 func githubEnv(cr *scmv1alpha1.GitHubMetricsExporter) []corev1.EnvVar {
-	env := append([]corev1.EnvVar{{Name: "GITHUB_ORG", Value: cr.Spec.Org}},
-		commonExporterEnv(cr.Spec.Export, cr.Spec.PollInterval)...)
+	env := append([]corev1.EnvVar{
+		{Name: "GITHUB_TARGET_TYPE", Value: cr.Spec.TargetType},
+		{Name: "GITHUB_ORG", Value: cr.Spec.Org},
+		{Name: "GITHUB_USER", Value: cr.Spec.User},
+	}, commonExporterEnv(cr.Spec.Export, cr.Spec.PollInterval)...)
 	if cr.Spec.CodeScanningTool != "" {
 		env = append(env, corev1.EnvVar{Name: "GITHUB_CODE_SCANNING_TOOL", Value: cr.Spec.CodeScanningTool})
 	}
@@ -191,8 +194,11 @@ func gitlabDeployment(cr *scmv1alpha1.GitLabMetricsExporter, image string) *apps
 }
 
 func gitlabEnv(cr *scmv1alpha1.GitLabMetricsExporter) []corev1.EnvVar {
-	env := append([]corev1.EnvVar{{Name: "GITLAB_GROUP", Value: cr.Spec.Group}},
-		commonExporterEnv(cr.Spec.Export, cr.Spec.PollInterval)...)
+	env := append([]corev1.EnvVar{
+		{Name: "GITLAB_TARGET_TYPE", Value: cr.Spec.TargetType},
+		{Name: "GITLAB_GROUP", Value: cr.Spec.Group},
+		{Name: "GITLAB_USER", Value: cr.Spec.User},
+	}, commonExporterEnv(cr.Spec.Export, cr.Spec.PollInterval)...)
 	if cr.Spec.BaseURL != "" {
 		env = append(env, corev1.EnvVar{Name: "GITLAB_URL", Value: cr.Spec.BaseURL})
 	}

@@ -24,6 +24,13 @@ const (
 	defaultGraphQLEndpoint = "https://api.github.com/graphql"
 	// defaultMaxPages bounds pagination so a misbehaving API cannot loop forever.
 	defaultMaxPages = 100
+
+	// Target types. An org is polled with one org-scoped code-scanning call; a user
+	// has no org-scoped code-scanning endpoint, so user targets iterate the user's
+	// repositories and call the per-repo endpoint. GraphQL (PRs + Dependabot) uses
+	// repositoryOwner(login:) and needs no branch -- it resolves either owner type.
+	targetOrg  = "org"
+	targetUser = "user"
 )
 
 // Options configures the GitHub provider. Auth is selected by which fields are set:
@@ -36,18 +43,20 @@ type Options struct {
 	AppID             int64
 	AppInstallationID int64
 	AppPrivateKeyPath string
+	TargetType        string // "org" (default) or "user"
 	CodeScanningTool  string // SARIF tool filter; empty counts all tools
 	BaseURL           string // REST base URL override (must accept a trailing slash)
 	GraphQLURL        string // GraphQL endpoint override
 	HTTPClient        *http.Client
 }
 
-// Provider polls a GitHub organization for review items and security findings.
+// Provider polls a GitHub organization or user for review items and security findings.
 type Provider struct {
-	rest     *gh.Client
-	graphql  *graphqlClient
-	toolName string
-	maxPages int
+	rest       *gh.Client
+	graphql    *graphqlClient
+	toolName   string
+	targetType string
+	maxPages   int
 }
 
 var _ provider.Provider = (*Provider)(nil)
@@ -75,27 +84,33 @@ func New(opts Options) (*Provider, error) {
 		endpoint = defaultGraphQLEndpoint
 	}
 
+	targetType := opts.TargetType
+	if targetType == "" {
+		targetType = targetOrg
+	}
+
 	return &Provider{
-		rest:     rest,
-		graphql:  &graphqlClient{httpClient: httpClient, endpoint: endpoint},
-		toolName: opts.CodeScanningTool,
-		maxPages: defaultMaxPages,
+		rest:       rest,
+		graphql:    &graphqlClient{httpClient: httpClient, endpoint: endpoint},
+		toolName:   opts.CodeScanningTool,
+		targetType: targetType,
+		maxPages:   defaultMaxPages,
 	}, nil
 }
 
 // Name identifies the provider on the "provider" metric attribute.
 func (p *Provider) Name() string { return "github" }
 
-// Snapshot polls the organization's repositories. It merges the GraphQL result
-// (open PRs + Dependabot findings) with the REST code scanning result. A single
-// failing source is recorded in SourceErrors and yields a partial snapshot; only
+// Snapshot polls the target owner's (organization or user) repositories. It merges the
+// GraphQL result (open PRs + Dependabot findings) with the REST code scanning result. A
+// single failing source is recorded in SourceErrors and yields a partial snapshot; only
 // when both sources fail does Snapshot return an error.
-func (p *Provider) Snapshot(ctx context.Context, org string) (provider.Snapshot, error) {
-	gql, gqlErr := p.collectGraphQL(ctx, org)
-	cs, csErr := p.collectCodeScanning(ctx, org)
+func (p *Provider) Snapshot(ctx context.Context, target string) (provider.Snapshot, error) {
+	gql, gqlErr := p.collectGraphQL(ctx, target)
+	cs, csErr := p.collectCodeScanning(ctx, target)
 
 	if gqlErr != nil && csErr != nil {
-		return provider.Snapshot{}, fmt.Errorf("github: all sources failed for %q: %w", org, errors.Join(gqlErr, csErr))
+		return provider.Snapshot{}, fmt.Errorf("github: all sources failed for %q: %w", target, errors.Join(gqlErr, csErr))
 	}
 
 	snap := provider.Snapshot{Repos: mergeRepos(gql.repos, cs.findings)}
@@ -106,16 +121,16 @@ func (p *Provider) Snapshot(ctx context.Context, org string) (provider.Snapshot,
 		snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceREST, Remaining: cs.rate})
 	}
 	if gqlErr != nil {
-		zlog.Warn().Err(gqlErr).Str("provider", "github").Str("source", provider.SourceGraphQL).Str("target", org).
+		zlog.Warn().Err(gqlErr).Str("provider", "github").Str("source", provider.SourceGraphQL).Str("target", target).
 			Msg("source failed; snapshot is partial")
 		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceGraphQL})
 	}
 	if csErr != nil {
-		zlog.Warn().Err(csErr).Str("provider", "github").Str("source", provider.SourceREST).Str("target", org).
+		zlog.Warn().Err(csErr).Str("provider", "github").Str("source", provider.SourceREST).Str("target", target).
 			Msg("source failed; snapshot is partial")
 		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceREST})
 	}
-	zlog.Debug().Str("provider", "github").Str("target", org).
+	zlog.Debug().Str("provider", "github").Str("target", target).
 		Int("repos", len(snap.Repos)).Int("rate_limits", len(snap.RateLimits)).
 		Msg("github snapshot assembled")
 	return snap, nil

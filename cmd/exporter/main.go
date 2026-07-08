@@ -97,6 +97,7 @@ func buildProvider(cfg config.Config) (provider.Provider, error) {
 			AppID:             cfg.GitHub.AppID,
 			AppInstallationID: cfg.GitHub.AppInstallationID,
 			AppPrivateKeyPath: cfg.GitHub.AppPrivateKeyPath,
+			TargetType:        cfg.GitHub.TargetType,
 			CodeScanningTool:  cfg.GitHub.CodeScanningTool,
 		})
 		if err != nil {
@@ -105,8 +106,9 @@ func buildProvider(cfg config.Config) (provider.Provider, error) {
 		return p, nil
 	case "gitlab":
 		p, err := providergitlab.New(providergitlab.Options{
-			Token:   cfg.GitLab.Token,
-			BaseURL: cfg.GitLab.BaseURL,
+			Token:      cfg.GitLab.Token,
+			TargetType: cfg.GitLab.TargetType,
+			BaseURL:    cfg.GitLab.BaseURL,
 		})
 		if err != nil {
 			return nil, err
