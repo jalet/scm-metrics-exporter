@@ -68,7 +68,11 @@ type ScrapeErrorRecorder func(providerName, source string)
 // In Prometheus mode autoexport serves /metrics itself on
 // OTEL_EXPORTER_PROMETHEUS_HOST:PORT (default localhost:9464); set the host to
 // 0.0.0.0 in a container. Do not stand up a separate HTTP server.
-func Setup(ctx context.Context, src SnapshotSource) (*sdkmetric.MeterProvider, ScrapeErrorRecorder, error) {
+//
+// version stamps the instrumentation scope; it surfaces as the otel_scope_version
+// label (Prometheus) / scope version (OTLP) on every series. Pass the build
+// version; an empty string is valid and leaves the label empty.
+func Setup(ctx context.Context, src SnapshotSource, version string) (*sdkmetric.MeterProvider, ScrapeErrorRecorder, error) {
 	reader, err := autoexport.NewMetricReader(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("metrics: create reader: %w", err)
@@ -77,7 +81,7 @@ func Setup(ctx context.Context, src SnapshotSource) (*sdkmetric.MeterProvider, S
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	otel.SetMeterProvider(mp)
 
-	record, err := register(mp.Meter(meterName), src)
+	record, err := register(mp.Meter(meterName, metric.WithInstrumentationVersion(version)), src)
 	if err != nil {
 		_ = mp.Shutdown(ctx)
 		return nil, nil, err
