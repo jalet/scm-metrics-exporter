@@ -1,8 +1,11 @@
 // Package gitlab implements provider.Provider for GitLab. It collects open merge
 // request counts per project via the REST API (a group projects list plus one
-// group-wide MR sweep) and open security-scan findings via a single group-level
-// GraphQL query. It takes no dependency on a GitLab SDK; both sources are hand-rolled
-// over net/http, mirroring the GitHub provider.
+// group-wide MR sweep), open security-scan findings via a group-level GraphQL query,
+// and per-project security posture (visibility, archived, default-branch protection,
+// dependency scanning) via a second GraphQL query over the group's projects. It takes
+// no dependency on a GitLab SDK; every source is hand-rolled over net/http, mirroring
+// the GitHub provider. Posture is a group-only signal: user targets return MR counts
+// only (GitLab has no user-scoped vulnerabilities API and no group.projects traversal).
 package gitlab
 
 import (
@@ -102,37 +105,55 @@ func (p *Provider) Snapshot(ctx context.Context, target string) (provider.Snapsh
 		if restErr != nil {
 			return provider.Snapshot{}, fmt.Errorf("gitlab: rest failed for user %q: %w", target, restErr)
 		}
-		snap := provider.Snapshot{Repos: mergeRepos(rest.projects, nil)}
+		snap := provider.Snapshot{Repos: mergeRepos(rest.projects, nil, nil)}
 		if rest.rateKnown {
 			snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceREST, Remaining: rest.rate})
 		}
 		zlog.Debug().Str("provider", "gitlab").Str("target", target).Int("repos", len(snap.Repos)).
-			Msg("gitlab user snapshot assembled (MR counts only; findings unsupported for users)")
+			Msg("gitlab user snapshot assembled (MR counts only; findings and posture unsupported for users)")
 		return snap, nil
 	}
 
 	vuln, vulnErr := p.collectVulnerabilities(ctx, target)
+	post, postErr := p.collectProjectPosture(ctx, target)
 
+	// REST and vulnerabilities are the load-bearing sources; posture is supplementary, so
+	// only a REST + vulnerabilities double failure is fatal.
 	if restErr != nil && vulnErr != nil {
-		return provider.Snapshot{}, fmt.Errorf("gitlab: all sources failed for %q: %w", target, errors.Join(restErr, vulnErr))
+		return provider.Snapshot{}, fmt.Errorf("gitlab: all sources failed for %q: %w", target, errors.Join(restErr, vulnErr, postErr))
 	}
 
-	snap := provider.Snapshot{Repos: mergeRepos(rest.projects, vuln.findings)}
+	snap := provider.Snapshot{Repos: mergeRepos(rest.projects, vuln.findings, post.posture)}
 	if rest.rateKnown {
 		snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceREST, Remaining: rest.rate})
 	}
-	if vuln.rateKnown {
-		snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceGraphQL, Remaining: vuln.rate})
+	// The vulnerabilities and posture calls share the GraphQL rate-limit budget; report it
+	// once, preferring the later (posture) reading when known.
+	gqlRate, gqlKnown := vuln.rate, vuln.rateKnown
+	if post.rateKnown {
+		gqlRate, gqlKnown = post.rate, true
+	}
+	if gqlKnown {
+		snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceGraphQL, Remaining: gqlRate})
 	}
 	if restErr != nil {
 		zlog.Warn().Err(restErr).Str("provider", "gitlab").Str("source", provider.SourceREST).Str("target", target).
 			Msg("source failed; snapshot is partial")
 		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceREST})
 	}
+	// A GraphQL outage can fail both the vulnerabilities and posture calls; record a single
+	// graphql SourceError so the scrape-error counter is not double-incremented.
 	if vulnErr != nil {
 		zlog.Warn().Err(vulnErr).Str("provider", "gitlab").Str("source", provider.SourceGraphQL).Str("target", target).
 			Msg("source failed; snapshot is partial")
 		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceGraphQL})
+	}
+	if postErr != nil {
+		zlog.Warn().Err(postErr).Str("provider", "gitlab").Str("source", provider.SourceGraphQL).Str("target", target).
+			Msg("posture source failed; snapshot is partial")
+		if vulnErr == nil {
+			snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceGraphQL})
+		}
 	}
 	zlog.Debug().Str("provider", "gitlab").Str("target", target).
 		Int("repos", len(snap.Repos)).Int("rate_limits", len(snap.RateLimits)).
@@ -147,7 +168,7 @@ func (p *Provider) Snapshot(ctx context.Context, target string) (provider.Snapsh
 // Unlike the GitHub provider (which keys on the bare repo name), a GitLab group may
 // span subgroups with duplicate project names, so the key and emitted Name are the
 // project's path_with_namespace (== the GraphQL fullPath), which is unique.
-func mergeRepos(projects []restProject, vulnFindings map[string][]provider.Finding) []provider.RepoMetrics {
+func mergeRepos(projects []restProject, vulnFindings map[string][]provider.Finding, posture map[string]*provider.RepoPosture) []provider.RepoMetrics {
 	byKey := make(map[string]*provider.RepoMetrics)
 	get := func(key string) *provider.RepoMetrics {
 		r, ok := byKey[key]
@@ -163,6 +184,9 @@ func mergeRepos(projects []restProject, vulnFindings map[string][]provider.Findi
 	for fullPath, fs := range vulnFindings {
 		r := get(fullPath)
 		r.Findings = append(r.Findings, fs...)
+	}
+	for fullPath, ps := range posture {
+		get(fullPath).Posture = ps
 	}
 
 	keys := make([]string, 0, len(byKey))

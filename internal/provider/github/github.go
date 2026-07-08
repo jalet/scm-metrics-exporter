@@ -165,6 +165,7 @@ func mergeRepos(gqlRepos []graphqlRepo, findingMaps ...map[string][]provider.Fin
 		r := get(gr.name)
 		r.OpenReviewItems = gr.openPRs
 		r.Findings = append(r.Findings, gr.findings...)
+		r.Posture = gr.posture
 	}
 	for _, fm := range findingMaps {
 		for name, fs := range fm {

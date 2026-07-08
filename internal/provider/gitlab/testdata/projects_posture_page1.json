@@ -1,0 +1,32 @@
+{
+  "data": {
+    "group": {
+      "projects": {
+        "pageInfo": { "hasNextPage": false, "endCursor": "" },
+        "nodes": [
+          {
+            "fullPath": "testgroup/alpha",
+            "visibility": "private",
+            "archived": false,
+            "securityScanners": { "enabled": ["SAST", "DEPENDENCY_SCANNING"] },
+            "branchRules": { "nodes": [ { "isDefault": true, "isProtected": true } ] }
+          },
+          {
+            "fullPath": "testgroup/beta",
+            "visibility": "internal",
+            "archived": false,
+            "securityScanners": { "enabled": [] },
+            "branchRules": { "nodes": [] }
+          },
+          {
+            "fullPath": "testgroup/gamma",
+            "visibility": "public",
+            "archived": true,
+            "securityScanners": null,
+            "branchRules": { "nodes": [ { "isDefault": false, "isProtected": true } ] }
+          }
+        ]
+      }
+    }
+  }
+}

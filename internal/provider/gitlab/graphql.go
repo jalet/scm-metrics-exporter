@@ -31,6 +31,30 @@ const groupVulnsQuery = `query GroupVulns($fullPath: ID!, $after: String) {
   }
 }`
 
+// groupProjectsQuery pages the group's projects (including subgroups) for security
+// posture. visibility and archived are cheap project fields; branchRules and
+// securityScanners give the default-branch protection and dependency-scanning state
+// without a per-project call. All of it rides one Relay-paginated traversal.
+const groupProjectsQuery = `query GroupProjects($fullPath: ID!, $after: String) {
+  group(fullPath: $fullPath) {
+    projects(includeSubgroups: true, first: 100, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        fullPath
+        visibility
+        archived
+        securityScanners { enabled }
+        branchRules(first: 50) { nodes { isDefault isProtected } }
+      }
+    }
+  }
+}`
+
+// scannerDependencyScanning is the securityScanners.enabled value that maps to the
+// provider-neutral "dependency alerting enabled" posture bit (GitLab's analogue of
+// GitHub Dependabot alerts).
+const scannerDependencyScanning = "DEPENDENCY_SCANNING"
+
 // reportTypeCategory maps GitLab report types to our finding categories (aligned with
 // GitLab's own feature categories). Unmapped types (dast, api_fuzzing, coverage_fuzzing,
 // sarif, generic) are skipped rather than bucketed.
@@ -81,6 +105,43 @@ type graphqlError struct {
 
 type vulnResult struct {
 	findings  map[string][]provider.Finding // keyed by project fullPath (== path_with_namespace)
+	rate      int64
+	rateKnown bool
+}
+
+// projectsResponse mirrors the JSON envelope of groupProjectsQuery. group and projects
+// are pointers so a null (missing access) is distinguishable from an empty node list;
+// securityScanners and branchRules are pointers for the same reason.
+type projectsResponse struct {
+	Data struct {
+		Group *struct {
+			Projects *struct {
+				PageInfo struct {
+					HasNextPage bool   `json:"hasNextPage"`
+					EndCursor   string `json:"endCursor"`
+				} `json:"pageInfo"`
+				Nodes []struct {
+					FullPath         string `json:"fullPath"`
+					Visibility       string `json:"visibility"`
+					Archived         bool   `json:"archived"`
+					SecurityScanners *struct {
+						Enabled []string `json:"enabled"`
+					} `json:"securityScanners"`
+					BranchRules *struct {
+						Nodes []struct {
+							IsDefault   bool `json:"isDefault"`
+							IsProtected bool `json:"isProtected"`
+						} `json:"nodes"`
+					} `json:"branchRules"`
+				} `json:"nodes"`
+			} `json:"projects"`
+		} `json:"group"`
+	} `json:"data"`
+	Errors []graphqlError `json:"errors"`
+}
+
+type postureResult struct {
+	posture   map[string]*provider.RepoPosture // keyed by project fullPath (== path_with_namespace)
 	rate      int64
 	rateKnown bool
 }
@@ -143,23 +204,30 @@ func mapVulnerabilities(gr *vulnResponse, into map[string][]provider.Finding) {
 }
 
 func (c *graphqlClient) do(ctx context.Context, group string, after *string) (*vulnResponse, int64, bool, error) {
-	payload, err := json.Marshal(map[string]any{
-		"query":     groupVulnsQuery,
-		"variables": map[string]any{"fullPath": group, "after": after},
-	})
+	var gr vulnResponse
+	rate, rateKnown, err := c.post(ctx, groupVulnsQuery, map[string]any{"fullPath": group, "after": after}, &gr)
+	return &gr, rate, rateKnown, err
+}
+
+// post executes one GraphQL query and unmarshals the response envelope into out. It
+// returns the RateLimit-Remaining reading when present. A transport error, a non-2xx
+// status, or a decode failure is returned as an error; GraphQL-level errors surface via
+// the decoded envelope's Errors field (checked by the caller).
+func (c *graphqlClient) post(ctx context.Context, query string, vars map[string]any, out any) (int64, bool, error) {
+	payload, err := json.Marshal(map[string]any{"query": query, "variables": vars})
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("gitlab graphql: marshal request: %w", err)
+		return 0, false, fmt.Errorf("gitlab graphql: marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("gitlab graphql: new request: %w", err)
+		return 0, false, fmt.Errorf("gitlab graphql: new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req) //nolint:gosec // endpoint is operator-configured (GraphQLURL), not attacker input
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("gitlab graphql: do request: %w", err)
+		return 0, false, fmt.Errorf("gitlab graphql: do request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -173,17 +241,88 @@ func (c *graphqlClient) do(ctx context.Context, group string, after *string) (*v
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, rate, rateKnown, fmt.Errorf("gitlab graphql: read response: %w", err)
+		return rate, rateKnown, fmt.Errorf("gitlab graphql: read response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, rate, rateKnown, fmt.Errorf("gitlab graphql: http %d: %s", resp.StatusCode, truncate(body))
+		return rate, rateKnown, fmt.Errorf("gitlab graphql: http %d: %s", resp.StatusCode, truncate(body))
 	}
+	if err := json.Unmarshal(body, out); err != nil {
+		return rate, rateKnown, fmt.Errorf("gitlab graphql: decode response: %w", err)
+	}
+	return rate, rateKnown, nil
+}
 
-	var gr vulnResponse
-	if err := json.Unmarshal(body, &gr); err != nil {
-		return nil, rate, rateKnown, fmt.Errorf("gitlab graphql: decode response: %w", err)
+// collectProjectPosture pages the group's projects for security posture, keyed by project
+// fullPath. A null group or null projects field, or any top-level GraphQL error, is
+// treated as "posture unavailable" and returned as an error so the caller records a
+// graphql SourceError while keeping the rest of the snapshot. Posture is supplementary:
+// its failure never fails the whole snapshot.
+func (p *Provider) collectProjectPosture(ctx context.Context, group string) (postureResult, error) {
+	res := postureResult{posture: make(map[string]*provider.RepoPosture)}
+	var after *string
+	for page := 0; page < p.maxPages; page++ {
+		var gr projectsResponse
+		rate, rateKnown, err := p.graphql.post(ctx, groupProjectsQuery, map[string]any{"fullPath": group, "after": after}, &gr)
+		if rateKnown {
+			res.rate, res.rateKnown = rate, true
+		}
+		if err != nil {
+			return res, err
+		}
+		if len(gr.Errors) > 0 {
+			return res, graphqlErrorsErr(gr.Errors)
+		}
+		if gr.Data.Group == nil || gr.Data.Group.Projects == nil {
+			return res, fmt.Errorf("gitlab graphql: projects unavailable for group %q", group)
+		}
+		mapProjectPosture(&gr, res.posture)
+		zlog.Debug().Str("provider", "gitlab").Str("source", "graphql").Str("group", group).
+			Int("page", page).Int("nodes_in_page", len(gr.Data.Group.Projects.Nodes)).
+			Int("repos_with_posture", len(res.posture)).Msg("fetched projects posture page")
+
+		pi := gr.Data.Group.Projects.PageInfo
+		if !pi.HasNextPage {
+			zlog.Debug().Str("provider", "gitlab").Str("source", "graphql").Str("group", group).
+				Int("repos_with_posture", len(res.posture)).Int("pages", page+1).Msg("posture collection complete")
+			return res, nil
+		}
+		after = &pi.EndCursor
 	}
-	return &gr, rate, rateKnown, nil
+	zlog.Warn().Str("group", group).Int("maxPages", p.maxPages).Msg("gitlab graphql posture pagination cap reached")
+	return res, nil
+}
+
+// mapProjectPosture fills the posture map from a decoded page. It is nil-safe on every
+// pointer so it never panics on arbitrary decoded input (fuzz target). BranchProtected is
+// true only when a branch rule both protects and is the default-branch rule, so a
+// protected non-default rule does not count as "default branch protected".
+func mapProjectPosture(gr *projectsResponse, into map[string]*provider.RepoPosture) {
+	if gr.Data.Group == nil || gr.Data.Group.Projects == nil {
+		return
+	}
+	for _, n := range gr.Data.Group.Projects.Nodes {
+		ps := &provider.RepoPosture{
+			Visibility: strings.ToLower(n.Visibility),
+			Archived:   n.Archived,
+		}
+		if n.SecurityScanners != nil {
+			for _, s := range n.SecurityScanners.Enabled {
+				if strings.EqualFold(s, scannerDependencyScanning) {
+					ps.DependabotEnabled = true
+					break
+				}
+			}
+		}
+		if n.BranchRules != nil {
+			for _, br := range n.BranchRules.Nodes {
+				if br.IsDefault && br.IsProtected {
+					ps.BranchProtected = true
+					break
+				}
+			}
+		}
+		into[n.FullPath] = ps
+	}
 }
 
 func graphqlErrorsErr(errs []graphqlError) error {

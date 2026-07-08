@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -31,9 +32,13 @@ func serveFixture(t *testing.T, w http.ResponseWriter, name string) {
 	_, _ = w.Write(data)
 }
 
-func readCursor(t *testing.T, r *http.Request) string {
+// readGraphQL decodes a GraphQL request body once, returning the query text (used to
+// route between the vulnerabilities and projects-posture queries, which share the
+// endpoint) and the pagination cursor.
+func readGraphQL(t *testing.T, r *http.Request) (query, after string) {
 	t.Helper()
 	var body struct {
+		Query     string `json:"query"`
 		Variables struct {
 			After *string `json:"after"`
 		} `json:"variables"`
@@ -41,11 +46,19 @@ func readCursor(t *testing.T, r *http.Request) string {
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		t.Fatalf("decode graphql request: %v", err)
 	}
-	if body.Variables.After == nil {
-		return ""
+	if body.Variables.After != nil {
+		after = *body.Variables.After
 	}
-	return *body.Variables.After
+	return body.Query, after
 }
+
+// isPostureQuery reports whether a GraphQL query is the projects-posture query rather
+// than the vulnerabilities query.
+func isPostureQuery(query string) bool { return strings.Contains(query, "projects(") }
+
+// emptyPostureBody is a valid projects-posture response with no projects: it lets a
+// handler satisfy the posture call without adding repos or a source error.
+const emptyPostureBody = `{"data":{"group":{"projects":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}`
 
 func mustNewProvider(t *testing.T, srv *httptest.Server, opts Options) *Provider {
 	t.Helper()
@@ -74,8 +87,13 @@ func TestSnapshotMergesAndPaginates(t *testing.T) {
 			w.Header().Set("RateLimit-Remaining", "58")
 			serveFixture(t, w, "mrs_page1.json")
 		case r.Method == http.MethodPost && r.URL.Path == graphqlPath:
+			query, cursor := readGraphQL(t, r)
+			if isPostureQuery(query) {
+				serveFixture(t, w, "projects_posture_page1.json") // no RateLimit-Remaining: graphql rate stays the vulns reading
+				return
+			}
 			w.Header().Set("RateLimit-Remaining", "1990")
-			switch readCursor(t, r) {
+			switch cursor {
 			case "":
 				serveFixture(t, w, "vulns_page1.json")
 			case "CUR2":
@@ -97,16 +115,16 @@ func TestSnapshotMergesAndPaginates(t *testing.T) {
 
 	want := provider.Snapshot{
 		Repos: []provider.RepoMetrics{
-			{Name: "testgroup/alpha", OpenReviewItems: 3, Findings: []provider.Finding{
+			{Name: "testgroup/alpha", OpenReviewItems: 3, Posture: &provider.RepoPosture{Visibility: "private", DependabotEnabled: true, BranchProtected: true}, Findings: []provider.Finding{
 				{Severity: "high", Category: "dependency"},
 				{Severity: "critical", Category: "static_analysis"},
 			}},
-			{Name: "testgroup/beta", OpenReviewItems: 0},
+			{Name: "testgroup/beta", OpenReviewItems: 0, Posture: &provider.RepoPosture{Visibility: "internal"}},
 			{Name: "testgroup/delta", OpenReviewItems: 0, Findings: []provider.Finding{
-				{Severity: "medium", Category: "secret"}, // GraphQL-only project (not in the projects list)
+				{Severity: "medium", Category: "secret"}, // GraphQL-vuln-only project (not in the projects list, so no posture)
 			}},
-			{Name: "testgroup/gamma", OpenReviewItems: 1, Findings: []provider.Finding{
-				{Severity: "low", Category: "container"}, // the DAST finding on alpha is skipped (unmapped)
+			{Name: "testgroup/gamma", OpenReviewItems: 1, Posture: &provider.RepoPosture{Visibility: "public", Archived: true}, Findings: []provider.Finding{
+				{Severity: "low", Category: "container"}, // the DAST finding on alpha is skipped (unmapped); protected non-default rule -> not branch_protected
 			}},
 		},
 		RateLimits: []provider.RateLimit{
@@ -128,6 +146,10 @@ func TestSnapshotVulnUnavailableIsPartial(t *testing.T) {
 			serveFixture(t, w, "mrs_page1.json")
 		case graphqlPath:
 			w.Header().Set("Content-Type", "application/json")
+			if query, _ := readGraphQL(t, r); isPostureQuery(query) {
+				_, _ = w.Write([]byte(emptyPostureBody)) // posture succeeds; only vulnerabilities is unavailable
+				return
+			}
 			_, _ = w.Write([]byte(`{"data":{"group":{"vulnerabilities":null}}}`))
 		default:
 			http.NotFound(w, r)
@@ -161,8 +183,13 @@ func TestSnapshotProjectsErrorIsPartial(t *testing.T) {
 		case projectsPath:
 			w.WriteHeader(http.StatusInternalServerError)
 		case graphqlPath:
+			query, cursor := readGraphQL(t, r)
+			if isPostureQuery(query) {
+				_, _ = w.Write([]byte(emptyPostureBody)) // posture succeeds; only REST projects fails
+				return
+			}
 			w.Header().Set("RateLimit-Remaining", "1990")
-			switch readCursor(t, r) {
+			switch cursor {
 			case "":
 				serveFixture(t, w, "vulns_page1.json")
 			default:
@@ -232,6 +259,51 @@ func TestNewAuthSelection(t *testing.T) {
 	if _, err := New(Options{}); err == nil {
 		t.Fatal("New with no credentials: got nil error, want failure")
 	}
+}
+
+func TestMapProjectPosture(t *testing.T) {
+	body := `{"data":{"group":{"projects":{"nodes":[
+		{"fullPath":"g/protected","visibility":"PRIVATE","archived":false,
+		 "securityScanners":{"enabled":["SAST","DEPENDENCY_SCANNING"]},
+		 "branchRules":{"nodes":[{"isDefault":true,"isProtected":true}]}},
+		{"fullPath":"g/loose","visibility":"public","archived":true,
+		 "securityScanners":{"enabled":["SAST"]},
+		 "branchRules":{"nodes":[{"isDefault":false,"isProtected":true},{"isDefault":true,"isProtected":false}]}},
+		{"fullPath":"g/null","visibility":"internal","securityScanners":null,"branchRules":null}
+	]}}}}`
+	var gr projectsResponse
+	if err := json.Unmarshal([]byte(body), &gr); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	got := map[string]*provider.RepoPosture{}
+	mapProjectPosture(&gr, got)
+
+	want := map[string]*provider.RepoPosture{
+		"g/protected": {Visibility: "private", Archived: false, DependabotEnabled: true, BranchProtected: true},
+		// dependency scanning off; default-branch rule is not protected, protected rule is not default -> not protected.
+		"g/loose": {Visibility: "public", Archived: true, DependabotEnabled: false, BranchProtected: false},
+		// null securityScanners/branchRules must not panic and read as false.
+		"g/null": {Visibility: "internal"},
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("posture mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func FuzzMapProjectPosture(f *testing.F) {
+	f.Add([]byte(`{"data":{"group":{"projects":{"nodes":[{"fullPath":"g/p","visibility":"private","securityScanners":{"enabled":["DEPENDENCY_SCANNING"]},"branchRules":{"nodes":[{"isDefault":true,"isProtected":true}]}}]}}}}`))
+	f.Add([]byte(`{}`))
+	f.Add([]byte(``))
+	f.Add([]byte(`{"data":{"group":null}}`))
+	f.Add([]byte(`{"data":{"group":{"projects":null}}}`))
+	f.Add([]byte(`{"data":{"group":{"projects":{"nodes":null}}}}`))
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		var gr projectsResponse
+		if err := json.Unmarshal(data, &gr); err != nil {
+			return
+		}
+		mapProjectPosture(&gr, map[string]*provider.RepoPosture{}) // must not panic
+	})
 }
 
 func FuzzMapVulnerabilities(f *testing.F) {

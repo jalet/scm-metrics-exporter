@@ -138,6 +138,31 @@ func TestObservableGaugesFindingDimensions(t *testing.T) {
 	metricdatatest.AssertAggregationsEqual(t, wantOn, collect(t, on)[metricSecurityFindings], metricdatatest.IgnoreTimestamp())
 }
 
+func TestObservableRepoInfo(t *testing.T) {
+	src := fakeSource{
+		names: []string{"github"},
+		snapshots: map[string]provider.Snapshot{
+			"github": {Repos: []provider.RepoMetrics{
+				{Name: "alpha", Posture: &provider.RepoPosture{Visibility: "private", DependabotEnabled: true, BranchProtected: true}},
+				{Name: "beta"}, // no posture -> no scm_repo_info series
+			}},
+		},
+	}
+	reader, _ := setupReader(t, src, Dimensions{})
+
+	want := metricdata.Gauge[int64]{DataPoints: []metricdata.DataPoint[int64]{
+		{Attributes: attribute.NewSet(
+			attribute.String(attrProvider, "github"),
+			attribute.String(attrRepo, "alpha"),
+			attribute.String(attrVisibility, "private"),
+			attribute.String(attrArchived, "false"),
+			attribute.String(attrBranchProtected, "true"),
+			attribute.String(attrDependabotEnabled, "true"),
+		), Value: 1},
+	}}
+	metricdatatest.AssertAggregationsEqual(t, want, collect(t, reader)[metricRepoInfo], metricdatatest.IgnoreTimestamp())
+}
+
 func TestScrapeErrorCounter(t *testing.T) {
 	reader, record := setupReader(t, fakeSource{}, Dimensions{})
 

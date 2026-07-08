@@ -13,6 +13,7 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/otel"
@@ -37,18 +38,23 @@ const (
 	metricSecurityFindings   = "scm.security_findings.open"
 	metricRateLimitRemaining = "scm.api.rate_limit_remaining"
 	metricScrapeErrors       = "scm.exporter.scrape_errors"
+	metricRepoInfo           = "scm.repo.info"
 )
 
 // Metric attribute keys.
 const (
-	attrProvider  = "provider"
-	attrRepo      = "repo"
-	attrSeverity  = "severity"
-	attrCategory  = "category"
-	attrResource  = "resource"
-	attrSource    = "source"
-	attrEcosystem = "ecosystem"
-	attrTool      = "tool"
+	attrProvider          = "provider"
+	attrRepo              = "repo"
+	attrSeverity          = "severity"
+	attrCategory          = "category"
+	attrResource          = "resource"
+	attrSource            = "source"
+	attrEcosystem         = "ecosystem"
+	attrTool              = "tool"
+	attrVisibility        = "visibility"
+	attrArchived          = "archived"
+	attrBranchProtected   = "branch_protected"
+	attrDependabotEnabled = "dependabot_enabled"
 )
 
 // SnapshotSource is the read side of the collector cache that the metrics callback
@@ -143,6 +149,11 @@ func register(meter metric.Meter, src SnapshotSource, dims Dimensions) (ScrapeEr
 	if err != nil {
 		return nil, fmt.Errorf("metrics: gauge %s: %w", metricRateLimitRemaining, err)
 	}
+	repoInfo, err := meter.Int64ObservableGauge(metricRepoInfo,
+		metric.WithDescription("Repository security posture (constant 1); the posture is carried on the labels."))
+	if err != nil {
+		return nil, fmt.Errorf("metrics: gauge %s: %w", metricRepoInfo, err)
+	}
 	scrapeErrors, err := meter.Int64Counter(metricScrapeErrors,
 		metric.WithDescription("Provider scrape errors, by source."))
 	if err != nil {
@@ -155,11 +166,11 @@ func register(meter metric.Meter, src SnapshotSource, dims Dimensions) (ScrapeEr
 			if !ok {
 				continue
 			}
-			observeSnapshot(o, name, snap, reviewItems, findings, rateLimit, dims)
+			observeSnapshot(o, name, snap, reviewItems, findings, rateLimit, repoInfo, dims)
 		}
 		return nil
 	}
-	if _, err := meter.RegisterCallback(callback, reviewItems, findings, rateLimit); err != nil {
+	if _, err := meter.RegisterCallback(callback, reviewItems, findings, rateLimit, repoInfo); err != nil {
 		return nil, fmt.Errorf("metrics: register callback: %w", err)
 	}
 
@@ -180,15 +191,26 @@ type findingKey struct {
 	severity, category, ecosystem, tool string
 }
 
-// observeSnapshot emits the three gauges for one provider's snapshot. dims selects the
+// observeSnapshot emits the per-provider gauges for one snapshot. dims selects the
 // optional ecosystem/tool finding labels.
-func observeSnapshot(o metric.Observer, name string, snap provider.Snapshot, reviewItems, findings, rateLimit metric.Int64ObservableGauge, dims Dimensions) {
+func observeSnapshot(o metric.Observer, name string, snap provider.Snapshot, reviewItems, findings, rateLimit, repoInfo metric.Int64ObservableGauge, dims Dimensions) {
 	for _, repo := range snap.Repos {
 		o.ObserveInt64(reviewItems, int64(repo.OpenReviewItems),
 			metric.WithAttributes(
 				attribute.String(attrProvider, name),
 				attribute.String(attrRepo, repo.Name),
 			))
+
+		if p := repo.Posture; p != nil {
+			o.ObserveInt64(repoInfo, 1, metric.WithAttributes(
+				attribute.String(attrProvider, name),
+				attribute.String(attrRepo, repo.Name),
+				attribute.String(attrVisibility, p.Visibility),
+				attribute.String(attrArchived, strconv.FormatBool(p.Archived)),
+				attribute.String(attrBranchProtected, strconv.FormatBool(p.BranchProtected)),
+				attribute.String(attrDependabotEnabled, strconv.FormatBool(p.DependabotEnabled)),
+			))
+		}
 
 		counts := make(map[findingKey]int64, len(repo.Findings))
 		for _, f := range repo.Findings {

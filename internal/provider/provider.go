@@ -55,6 +55,23 @@ type RepoMetrics struct {
 	OpenReviewItems int
 	// Findings lists the open security findings for the repository.
 	Findings []Finding
+	// Posture is the repository's security-posture snapshot, or nil when the provider
+	// did not capture it (feeds the scm.repo.info gauge). It is treated as immutable.
+	Posture *RepoPosture
+}
+
+// RepoPosture is a repository's security-configuration snapshot. Some fields are
+// admin-gated on GitHub, so a token without admin access may report them as false.
+type RepoPosture struct {
+	// Visibility is public, private, or internal (lowercased).
+	Visibility string
+	// Archived reports whether the repository is archived.
+	Archived bool
+	// DependabotEnabled reports whether automated dependency-vulnerability alerting is
+	// enabled: GitHub Dependabot alerts, or GitLab dependency scanning.
+	DependabotEnabled bool
+	// BranchProtected reports whether the default branch has a branch-protection rule.
+	BranchProtected bool
 }
 
 // Finding is a single open security finding.

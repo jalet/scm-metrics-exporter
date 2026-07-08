@@ -24,6 +24,10 @@ const ownerMetricsQuery = `query OwnerMetrics($login: String!, $cursor: String) 
       pageInfo { hasNextPage endCursor }
       nodes {
         name
+        isArchived
+        visibility
+        hasVulnerabilityAlertsEnabled
+        defaultBranchRef { branchProtectionRule { id } }
         pullRequests(states: OPEN) { totalCount }
         vulnerabilityAlerts(states: OPEN, first: 100) {
           nodes { securityVulnerability { severity package { ecosystem } } }
@@ -49,7 +53,15 @@ type graphqlResponse struct {
 					EndCursor   string `json:"endCursor"`
 				} `json:"pageInfo"`
 				Nodes []struct {
-					Name         string `json:"name"`
+					Name                          string `json:"name"`
+					IsArchived                    bool   `json:"isArchived"`
+					Visibility                    string `json:"visibility"`
+					HasVulnerabilityAlertsEnabled bool   `json:"hasVulnerabilityAlertsEnabled"`
+					DefaultBranchRef              *struct {
+						BranchProtectionRule *struct {
+							ID string `json:"id"`
+						} `json:"branchProtectionRule"`
+					} `json:"defaultBranchRef"`
 					PullRequests struct {
 						TotalCount int `json:"totalCount"`
 					} `json:"pullRequests"`
@@ -82,6 +94,7 @@ type graphqlRepo struct {
 	name     string
 	openPRs  int
 	findings []provider.Finding
+	posture  *provider.RepoPosture
 }
 
 type graphqlResult struct {
@@ -170,6 +183,12 @@ func mapGraphQLRepos(gr *graphqlResponse) []graphqlRepo {
 	repos := make([]graphqlRepo, 0, len(nodes))
 	for _, n := range nodes {
 		repo := graphqlRepo{name: n.Name, openPRs: n.PullRequests.TotalCount}
+		repo.posture = &provider.RepoPosture{
+			Visibility:        strings.ToLower(n.Visibility),
+			Archived:          n.IsArchived,
+			DependabotEnabled: n.HasVulnerabilityAlertsEnabled,
+			BranchProtected:   n.DefaultBranchRef != nil && n.DefaultBranchRef.BranchProtectionRule != nil,
+		}
 		for _, a := range n.VulnerabilityAlerts.Nodes {
 			repo.findings = append(repo.findings, provider.Finding{
 				Severity:  provider.NormalizeSeverity(a.SecurityVulnerability.Severity),
