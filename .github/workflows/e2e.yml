@@ -69,6 +69,8 @@ jobs:
             tokenKey: token
             credentialsSecret:
               name: does-not-exist
+            export:
+              otlpEndpoint: http://otel-collector.observability:4318
           EOF
           if kubectl apply -f /tmp/bad-cr.yaml; then
             echo "::error::bad CR was admitted; the validating webhook did not reject it"
