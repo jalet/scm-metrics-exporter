@@ -76,7 +76,7 @@ One operator control loop plus ephemeral collection Jobs.
    writes .status.discoveredRepositories (+ lastDiscoveryTime, Discovered condition)
         |
         v  dispatch, at most spec.parallelism active, owner-refs, GC
-   [Collection Job per repo]  --once --repo=<owner>/<name>
+   [Collection Job per repo]  --once --repo=<name>  (owner from the target env)
         mints repo-scoped token from mounted App key
         collects review items + findings + posture + workflow runs
         pushes OTLP  -->  [OTLP collector / OTLP-ingesting Prometheus]
@@ -109,12 +109,14 @@ whole-repo failure so Job backoff and alerting see real outages.
 The binary factors over the existing provider / collector / metrics pieces and gains one
 run mode (the default long-running poll+serve mode is removed):
 
-- `--once --repo=<owner>/<repo>`: single-repository collection, self-minted repo-scoped
-  token, OTLP push, exit.
+- `--once --repo=<name>`: single-repository collection (the owner comes from the target
+  env, `GITHUB_ORG`/`GITHUB_USER`), self-minted repo-scoped token, OTLP push, exit.
 
-It always uses the OTLP exporter. The Prometheus autoexport path and the `/metrics` HTTP
-server are removed. Discovery is not a binary mode -- it runs in the operator (the binary
-stays Kubernetes-agnostic).
+It uses the OTLP exporter (or console for local dev). The Prometheus pull path and the
+`/metrics` HTTP server are removed at the product level when the pull stack is stripped;
+swapping the autoexport reader for an explicit OTLP reader and dropping the
+autoexport/prometheus dependencies is done in the removal phase. Discovery is not a binary
+mode -- it runs in the operator (the binary stays Kubernetes-agnostic).
 
 ## 5. CRD changes
 

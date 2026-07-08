@@ -14,6 +14,7 @@ import (
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/failsafe-go/failsafe-go/failsafehttp"
+	ghv88 "github.com/google/go-github/v88/github" // only for ghinstallation.Transport.InstallationTokenOptions (the go-github major ghinstallation/v2 bundles); everything else uses gh (v89)
 	gh "github.com/google/go-github/v89/github"
 	zlog "github.com/rs/zerolog/log"
 
@@ -44,10 +45,14 @@ type Options struct {
 	AppInstallationID int64
 	AppPrivateKeyPath string
 	TargetType        string // "org" (default) or "user"
-	CodeScanningTool  string // SARIF tool filter; empty counts all tools
-	BaseURL           string // REST base URL override (must accept a trailing slash)
-	GraphQLURL        string // GraphQL endpoint override
-	HTTPClient        *http.Client
+	// RepoScope, when set with GitHub App auth, restricts the minted installation token to
+	// that single repository (least privilege). Used by run-once per-repo collection; it
+	// has no effect with PAT auth.
+	RepoScope        string
+	CodeScanningTool string // SARIF tool filter; empty counts all tools
+	BaseURL          string // REST base URL override (must accept a trailing slash)
+	GraphQLURL       string // GraphQL endpoint override
+	HTTPClient       *http.Client
 }
 
 // Provider polls a GitHub organization or user for review items and security findings.
@@ -280,6 +285,10 @@ func authTransport(opts Options, base http.RoundTripper) (http.RoundTripper, err
 		itr, err := ghinstallation.NewKeyFromFile(base, opts.AppID, opts.AppInstallationID, opts.AppPrivateKeyPath)
 		if err != nil {
 			return nil, fmt.Errorf("github: app auth: %w", err)
+		}
+		if opts.RepoScope != "" {
+			// Scope the minted installation token to the single repository (least privilege).
+			itr.InstallationTokenOptions = &ghv88.InstallationTokenOptions{Repositories: []string{opts.RepoScope}}
 		}
 		return itr, nil
 	case opts.Token != "":

@@ -44,6 +44,67 @@ func (f *fakeProvider) Snapshot(ctx context.Context, _ string) (provider.Snapsho
 	return f.snap, nil
 }
 
+// fakeRepoProvider also implements provider.RepoSnapshotter, recording the owner/repo it
+// was asked to collect. The embedded fakeProvider.Snapshot must not be called in repo mode.
+type fakeRepoProvider struct {
+	fakeProvider
+	repoSnap provider.Snapshot
+	repoErr  error
+	gotOwner string
+	gotRepo  string
+}
+
+var _ provider.RepoSnapshotter = (*fakeRepoProvider)(nil)
+
+func (f *fakeRepoProvider) SnapshotRepo(_ context.Context, owner, repo string) (provider.Snapshot, error) {
+	f.gotOwner, f.gotRepo = owner, repo
+	if f.repoErr != nil {
+		return provider.Snapshot{}, f.repoErr
+	}
+	return f.repoSnap, nil
+}
+
+func TestPollOnceRepoScoped(t *testing.T) {
+	p := &fakeRepoProvider{
+		fakeProvider: fakeProvider{name: "github"},
+		repoSnap:     provider.Snapshot{Repos: []provider.RepoMetrics{{Name: "widget", OpenReviewItems: 2}}},
+	}
+	c := New(Entry{Provider: p, Target: "acme", Repo: "widget"})
+	if err := c.PollOnce(context.Background(), (&errRec{}).record); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if p.gotOwner != "acme" || p.gotRepo != "widget" {
+		t.Errorf("SnapshotRepo(%q, %q), want (acme, widget)", p.gotOwner, p.gotRepo)
+	}
+	if n := p.calls.Load(); n != 0 {
+		t.Errorf("full Snapshot called %d times, want 0 (repo-scoped)", n)
+	}
+	got, ok := c.Latest("github")
+	if !ok || len(got.Repos) != 1 || got.Repos[0].Name != "widget" {
+		t.Fatalf("Latest = %+v ok=%v, want the widget snapshot stored", got, ok)
+	}
+}
+
+func TestPollOnceHardErrorReturnsError(t *testing.T) {
+	p := &fakeProvider{name: "github", err: errors.New("boom")}
+	c := New(Entry{Provider: p, Target: "org"})
+	rec := &errRec{}
+	if err := c.PollOnce(context.Background(), rec.record); err == nil {
+		t.Fatal("PollOnce: got nil, want the hard error surfaced for the exit code")
+	}
+	if got := rec.snapshot(); len(got) != 1 || got[0] != [2]string{"github", ""} {
+		t.Errorf("scrape errors = %v, want one provider-level (empty-source) error", got)
+	}
+}
+
+func TestPollOnceRepoUnsupportedProvider(t *testing.T) {
+	// fakeProvider does not implement RepoSnapshotter, so a repo-scoped entry must error.
+	c := New(Entry{Provider: &fakeProvider{name: "gitlab"}, Target: "grp", Repo: "widget"})
+	if err := c.PollOnce(context.Background(), (&errRec{}).record); err == nil {
+		t.Fatal("PollOnce: got nil, want an error for a provider without single-repo support")
+	}
+}
+
 // errRec is a concurrency-safe record of onScrapeError calls.
 type errRec struct {
 	mu  sync.Mutex

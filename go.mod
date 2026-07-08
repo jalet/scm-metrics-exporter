@@ -6,6 +6,7 @@ require (
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
 	github.com/failsafe-go/failsafe-go v0.9.6
 	github.com/google/go-cmp v0.7.0
+	github.com/google/go-github/v88 v88.0.0
 	github.com/google/go-github/v89 v89.0.0
 	github.com/rs/zerolog v1.35.1
 	go.opentelemetry.io/contrib/exporters/autoexport v0.69.0
@@ -38,7 +39,6 @@ require (
 	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
-	github.com/google/go-github/v88 v88.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
