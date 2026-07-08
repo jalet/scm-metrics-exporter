@@ -6,7 +6,7 @@ backend (a Prometheus scrape endpoint or an OTLP push) is chosen at runtime from
 single instrumentation surface. A companion Kubernetes operator reconciles
 per-provider custom resources into exporter Deployments.
 
-- **GitHub** (open pull requests, Dependabot alerts, code scanning alerts).
+- **GitHub** (open pull requests, Dependabot alerts, code scanning alerts, secret scanning alerts).
 - **GitLab** (open merge requests, and vulnerability findings on the Ultimate tier:
   dependency, SAST, secret, and container scanning).
 
@@ -31,9 +31,10 @@ per-provider custom resources into exporter Deployments.
 | `scm.api.rate_limit_remaining` | gauge | provider, resource | `scm_api_rate_limit_remaining` |
 | `scm.exporter.scrape_errors` | counter | provider, source | `scm_exporter_scrape_errors_total` |
 
-`severity` is one of `critical`, `high`, `medium`, `low`. `category` is one of
-`dependency`, `static_analysis`, `secret`, `container`. `source` is `graphql` or
-`rest`; `resource` is `graphql` or `rest`.
+`severity` is one of `critical`, `high`, `medium`, `low`, or `unknown` (GitHub
+secret-scanning alerts carry no severity). `category` is one of `dependency`,
+`static_analysis`, `secret`, `container`. `source` is `graphql`, `rest`, or
+`secret_scanning`; `resource` is `graphql` or `rest`.
 
 ## Components
 
@@ -207,7 +208,8 @@ After changing API types or RBAC markers, run `mise run generate manifests` and
 
 - **`scm_exporter_scrape_errors_total` increasing** -- a data source is failing. Check
   the exporter logs; a `source="graphql"` error is often a token missing Dependabot
-  access, `source="rest"` is often code scanning access or the feature not enabled.
+  access, `source="rest"` is often code scanning access or the feature not enabled, and
+  `source="secret_scanning"` is often the token missing secret-scanning access.
 - **CR stuck `Ready=False` / `CredentialsInvalid`** -- the referenced Secret is missing
   or lacks the key named by `tokenKey` / `appPrivateKeyKey`.
 - **No `scm_*` series** -- the first poll has not completed or all sources failed; the

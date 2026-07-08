@@ -58,7 +58,10 @@ func mustNewProvider(t *testing.T, srv *httptest.Server, opts Options) *Provider
 	return p
 }
 
-const codeScanningPath = "/orgs/testorg/code-scanning/alerts"
+const (
+	codeScanningPath   = "/orgs/testorg/code-scanning/alerts"
+	secretScanningPath = "/orgs/testorg/secret-scanning/alerts"
+)
 
 func TestSnapshotMergesAndPaginates(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -81,6 +84,8 @@ func TestSnapshotMergesAndPaginates(t *testing.T) {
 			w.Header().Set("X-RateLimit-Remaining", "4899")
 			w.Header().Set("Link", fmt.Sprintf(`<http://%s%s?page=2>; rel="next"`, r.Host, codeScanningPath))
 			serveFixture(t, w, "codescan_page1.json")
+		case r.Method == http.MethodGet && r.URL.Path == secretScanningPath:
+			_, _ = w.Write([]byte(`[]`))
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -128,6 +133,8 @@ func TestSnapshotCodeScanning403IsPartial(t *testing.T) {
 			w.Header().Set("X-RateLimit-Remaining", "4900")
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"message":"Resource not accessible by integration"}`))
+		case r.Method == http.MethodGet && r.URL.Path == secretScanningPath:
+			_, _ = w.Write([]byte(`[]`))
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -165,6 +172,8 @@ func TestSnapshotCodeScanningToolFilter(t *testing.T) {
 			gotTool = r.URL.Query().Get("tool_name")
 			w.Header().Set("X-RateLimit-Remaining", "5000")
 			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodGet && r.URL.Path == secretScanningPath:
+			_, _ = w.Write([]byte(`[]`))
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -178,6 +187,49 @@ func TestSnapshotCodeScanningToolFilter(t *testing.T) {
 	}
 	if gotTool != "CodeQL" {
 		t.Errorf("code scanning tool_name = %q, want CodeQL", gotTool)
+	}
+}
+
+func TestSnapshotSecretScanning(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			serveFixture(t, w, "graphql_single.json") // repo "solo" with a dependency finding
+		case r.Method == http.MethodGet && r.URL.Path == codeScanningPath:
+			_, _ = w.Write([]byte(`[]`))
+		case r.Method == http.MethodGet && r.URL.Path == secretScanningPath:
+			w.Header().Set("X-RateLimit-Remaining", "4990")
+			_, _ = w.Write([]byte(`[{"number":1,"repository":{"name":"solo"}},{"number":2,"repository":{"name":"other"}}]`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := mustNewProvider(t, srv, Options{}).Snapshot(context.Background(), "testorg")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	secret := provider.Finding{Severity: provider.SeverityUnknown, Category: provider.CategorySecret}
+	byName := map[string][]provider.Finding{}
+	for _, repo := range got.Repos {
+		byName[repo.Name] = repo.Findings
+	}
+	for _, name := range []string{"solo", "other"} {
+		if !slices.Contains(byName[name], secret) {
+			t.Errorf("repo %q findings = %+v, want a secret finding %+v", name, byName[name], secret)
+		}
+	}
+	hasDep := false
+	for _, f := range byName["solo"] {
+		if f.Category == provider.CategoryDependency {
+			hasDep = true
+		}
+	}
+	if !hasDep {
+		t.Errorf("repo solo lost its graphql dependency finding: %+v", byName["solo"])
 	}
 }
 
@@ -195,6 +247,8 @@ func TestSnapshotUserTarget(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/octocat/locked/code-scanning/alerts":
 			w.WriteHeader(http.StatusForbidden) // code scanning not enabled -> skipped, not a failure
 			_, _ = w.Write([]byte(`{"message":"no code scanning on this repo"}`))
+		case r.Method == http.MethodGet && (r.URL.Path == "/repos/octocat/solo/secret-scanning/alerts" || r.URL.Path == "/repos/octocat/locked/secret-scanning/alerts"):
+			_, _ = w.Write([]byte(`[]`))
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)

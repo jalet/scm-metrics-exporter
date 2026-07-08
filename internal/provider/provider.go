@@ -86,6 +86,9 @@ const (
 	SeverityHigh     = "high"
 	SeverityMedium   = "medium"
 	SeverityLow      = "low"
+	// SeverityUnknown labels findings whose source reports no severity -- GitHub
+	// secret-scanning alerts carry no severity field.
+	SeverityUnknown = "unknown"
 )
 
 // Finding categories emitted on the "category" metric attribute.
@@ -98,8 +101,9 @@ const (
 
 // Data sources, emitted on the "source" attribute of scm.exporter.scrape_errors.
 const (
-	SourceGraphQL = "graphql"
-	SourceREST    = "rest"
+	SourceGraphQL        = "graphql"
+	SourceREST           = "rest"
+	SourceSecretScanning = "secret_scanning"
 )
 
 // API resources, emitted on the "resource" attribute of
