@@ -30,6 +30,7 @@ func (p *Provider) collectCodeScanning(ctx context.Context, org string) (codeSca
 	}
 	opts.ListOptions.PerPage = 100
 
+	total := 0
 	for page := 0; page < p.maxPages; page++ {
 		alerts, resp, err := p.rest.CodeScanning.ListAlertsForOrg(ctx, org, opts)
 		if resp != nil {
@@ -50,8 +51,15 @@ func (p *Provider) collectCodeScanning(ctx context.Context, org string) (codeSca
 				Category: provider.CategoryStaticAnalysis,
 			})
 		}
+		total += len(alerts)
+		zlog.Debug().Str("provider", "github").Str("source", "rest").Str("org", org).
+			Int("page", page).Int("alerts_in_page", len(alerts)).Int64("rate_remaining", res.rate).
+			Msg("fetched code scanning page")
 
 		if resp == nil || resp.NextPage == 0 {
+			zlog.Debug().Str("provider", "github").Str("source", "rest").Str("org", org).
+				Int("alerts", total).Int("repos_with_findings", len(res.findings)).Int("pages", page+1).
+				Msg("code scanning collection complete")
 			return res, nil
 		}
 		opts.ListOptions.Page = resp.NextPage

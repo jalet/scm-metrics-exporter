@@ -15,6 +15,7 @@ import (
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/failsafe-go/failsafe-go/failsafehttp"
 	gh "github.com/google/go-github/v89/github"
+	zlog "github.com/rs/zerolog/log"
 
 	"github.com/jalet/scm-metrics-exporter/internal/provider"
 )
@@ -105,11 +106,18 @@ func (p *Provider) Snapshot(ctx context.Context, org string) (provider.Snapshot,
 		snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceREST, Remaining: cs.rate})
 	}
 	if gqlErr != nil {
+		zlog.Warn().Err(gqlErr).Str("provider", "github").Str("source", provider.SourceGraphQL).Str("target", org).
+			Msg("source failed; snapshot is partial")
 		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceGraphQL})
 	}
 	if csErr != nil {
+		zlog.Warn().Err(csErr).Str("provider", "github").Str("source", provider.SourceREST).Str("target", org).
+			Msg("source failed; snapshot is partial")
 		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceREST})
 	}
+	zlog.Debug().Str("provider", "github").Str("target", org).
+		Int("repos", len(snap.Repos)).Int("rate_limits", len(snap.RateLimits)).
+		Msg("github snapshot assembled")
 	return snap, nil
 }
 

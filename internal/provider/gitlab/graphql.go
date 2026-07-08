@@ -104,9 +104,14 @@ func (p *Provider) collectVulnerabilities(ctx context.Context, group string) (vu
 			return res, fmt.Errorf("gitlab graphql: vulnerabilities unavailable for group %q (non-Ultimate or missing security access)", group)
 		}
 		mapVulnerabilities(gr, res.findings)
+		zlog.Debug().Str("provider", "gitlab").Str("source", "graphql").Str("group", group).
+			Int("page", page).Int("nodes_in_page", len(gr.Data.Group.Vulnerabilities.Nodes)).
+			Int("repos_with_findings", len(res.findings)).Msg("fetched vulnerabilities page")
 
 		pi := gr.Data.Group.Vulnerabilities.PageInfo
 		if !pi.HasNextPage {
+			zlog.Debug().Str("provider", "gitlab").Str("source", "graphql").Str("group", group).
+				Int("repos_with_findings", len(res.findings)).Int("pages", page+1).Msg("vulnerabilities collection complete")
 			return res, nil
 		}
 		after = &pi.EndCursor

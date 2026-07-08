@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+
+	zlog "github.com/rs/zerolog/log"
 )
 
 type restClient struct {
@@ -57,8 +59,12 @@ func (p *Provider) collectREST(ctx context.Context, group string) (restResult, e
 		for _, pr := range projects {
 			res.projects = append(res.projects, restProject{id: pr.ID, pathWithNamespace: pr.PathWithNamespace})
 		}
+		zlog.Debug().Str("provider", "gitlab").Str("source", "rest").Str("group", group).Str("phase", "projects").
+			Int("page", page).Int("in_page", len(projects)).Int("total", len(res.projects)).Msg("fetched projects page")
 		next = nextPage
 	}
+	zlog.Debug().Str("provider", "gitlab").Str("source", "rest").Str("group", group).
+		Int("projects", len(res.projects)).Msg("gitlab project listing complete")
 
 	counts := make(map[int64]int)
 	mrPath := fmt.Sprintf("/groups/%s/merge_requests?state=opened&scope=all&per_page=100", gid)
@@ -79,11 +85,15 @@ func (p *Provider) collectREST(ctx context.Context, group string) (restResult, e
 		for _, mr := range mrs {
 			counts[mr.ProjectID]++
 		}
+		zlog.Debug().Str("provider", "gitlab").Str("source", "rest").Str("group", group).Str("phase", "merge_requests").
+			Int("page", page).Int("in_page", len(mrs)).Msg("fetched merge requests page")
 		next = nextPage
 	}
 	for i := range res.projects {
 		res.projects[i].openMRs = counts[res.projects[i].id] // absent -> 0
 	}
+	zlog.Debug().Str("provider", "gitlab").Str("source", "rest").Str("group", group).
+		Int("projects_with_open_mrs", len(counts)).Msg("gitlab merge request sweep complete")
 	return res, nil
 }
 
