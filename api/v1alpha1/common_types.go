@@ -49,6 +49,18 @@ type ExporterSpec struct {
 	// +optional
 	FindingDimensions []string `json:"findingDimensions,omitempty"`
 
+	// CollectWorkflows enables recent CI-run metrics (scm_workflow_runs_recent): GitHub
+	// Actions workflow runs, or GitLab pipelines. Off by default because it adds an API
+	// call per repository and extra series cardinality.
+	// +optional
+	CollectWorkflows bool `json:"collectWorkflows,omitempty"`
+
+	// WorkflowLookback bounds how far back CI runs are counted (used when CollectWorkflows
+	// is true).
+	// +kubebuilder:default="168h"
+	// +optional
+	WorkflowLookback metav1.Duration `json:"workflowLookback,omitempty"`
+
 	// CredentialsSecret names the Secret in the CR's namespace holding the provider
 	// credentials referenced by the provider-specific key fields.
 	CredentialsSecret corev1.LocalObjectReference `json:"credentialsSecret"`

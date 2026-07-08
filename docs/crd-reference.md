@@ -21,6 +21,8 @@ These fields are present on both `GitHubMetricsExporter` and `GitLabMetricsExpor
 | `autoDiscover.include` | RepoFilter | (empty = all) | Candidate repositories to collect. |
 | `autoDiscover.exclude` | RepoFilter | (empty = none) | Repositories removed from the include set. |
 | `findingDimensions` | `[]string` (enum `ecosystem`\|`tool`) | none | Optional extra labels on `scm_security_findings_open`. Off by default (raises cardinality). |
+| `collectWorkflows` | boolean | `false` | Collect recent CI-run metrics (`scm_workflow_runs_recent`): GitHub Actions runs or GitLab pipelines. Opt-in (adds an API call per repo + cardinality). |
+| `workflowLookback` | duration string | `168h` | How far back to count CI runs (used when `collectWorkflows: true`). |
 | `credentialsSecret.name` | string | (required) | Secret in the CR namespace holding the credentials. |
 
 ### `RepoFilter` (used by `autoDiscover.include` / `.exclude`)
@@ -51,8 +53,6 @@ Short name `ghme`. Spec = `ExporterSpec` plus:
 | `appInstallationID` | integer | | GitHub App installation ID (required when `authMode: app`). |
 | `appPrivateKeyKey` | string | | Secret key holding the App private key PEM (required when `authMode: app`). |
 | `codeScanningTool` | string | (all tools) | Filter code scanning alerts to one SARIF tool. |
-| `collectWorkflows` | boolean | `false` | Collect recent GitHub Actions workflow-run metrics (`scm_workflow_runs_recent`). Opt-in: adds an API call per repo and extra cardinality. |
-| `workflowLookback` | duration string | `168h` | How far back to count workflow runs (used when `collectWorkflows: true`). |
 
 With `authMode: app`, each collection Job mints a repository-scoped installation token
 (least privilege). Install one App per organization to give each CR its own rate budget.

@@ -68,6 +68,47 @@ func TestSnapshotRepo(t *testing.T) {
 	}
 }
 
+func TestSnapshotRepoPipelines(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == graphqlPath:
+			w.Header().Set("Content-Type", "application/json")
+			query, _ := readGraphQL(t, r)
+			if strings.Contains(query, "ProjectPosture") {
+				_, _ = w.Write([]byte(projectPostureJSON))
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":{"project":{"vulnerabilities":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}`))
+		case strings.Contains(r.URL.Path, "/pipelines"):
+			_, _ = w.Write([]byte(`[
+				{"status":"success","source":"push"},
+				{"status":"failed","source":"push"},
+				{"status":"success","source":"schedule"},
+				{"status":"running","source":"push"}
+			]`))
+		case strings.Contains(r.URL.Path, "/merge_requests"):
+			_, _ = w.Write([]byte(`[{}]`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := mustNewProvider(t, srv, Options{CollectWorkflows: true}).SnapshotRepo(context.Background(), "acme", "acme/svc")
+	if err != nil {
+		t.Fatalf("SnapshotRepo: %v", err)
+	}
+	want := []provider.WorkflowRunStat{
+		{Workflow: "push", Conclusion: "failed", Count: 1},
+		{Workflow: "push", Conclusion: "success", Count: 1},
+		{Workflow: "schedule", Conclusion: "success", Count: 1},
+	}
+	if diff := cmp.Diff(want, got.Repos[0].WorkflowRuns); diff != "" {
+		t.Errorf("pipeline runs mismatch (-want +got):\n%s\n(running pipelines must be skipped)", diff)
+	}
+}
+
 func TestSnapshotRepoVulnsUnavailableIsPartial(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {

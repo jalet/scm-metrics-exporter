@@ -221,6 +221,12 @@ func gitlabEnv(cr *scmv1alpha1.GitLabMetricsExporter) []corev1.EnvVar {
 	if cr.Spec.BaseURL != "" {
 		env = append(env, corev1.EnvVar{Name: "GITLAB_URL", Value: cr.Spec.BaseURL})
 	}
+	if cr.Spec.CollectWorkflows {
+		env = append(env,
+			corev1.EnvVar{Name: "GITLAB_COLLECT_WORKFLOWS", Value: "true"},
+			corev1.EnvVar{Name: "GITLAB_WORKFLOW_LOOKBACK", Value: cr.Spec.WorkflowLookback.Duration.String()},
+		)
+	}
 	return append(env, corev1.EnvVar{
 		Name:      "GITLAB_TOKEN",
 		ValueFrom: secretKeyRef(cr.Spec.CredentialsSecret, cr.Spec.TokenKey),

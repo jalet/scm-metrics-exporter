@@ -50,11 +50,16 @@ dependency-vulnerability alerting is on (GitHub Dependabot alerts, or GitLab dep
 scanning). Some fields are admin-gated, so a token without the required access may report
 them as `false`.
 
-`scm_workflow_runs_recent` (GitHub only, opt-in via `spec.collectWorkflows`) counts recent
-GitHub Actions runs in a lookback window (`spec.workflowLookback`, default 7d) by `workflow`
-and `conclusion` (`success`, `failure`, `cancelled`, ...); runs still in progress are
-skipped. It is a gauge because collection is run-once per cycle: compute a failure ratio in
-the query, e.g. `failure / (success+failure)`.
+`scm_workflow_runs_recent` (opt-in via `spec.collectWorkflows`) counts recent CI runs in a
+lookback window (`spec.workflowLookback`, default 7d) by `workflow` and `conclusion`;
+in-progress/transient runs are skipped. It is a gauge because collection is run-once per
+cycle: compute a failure ratio in the query, e.g. `failure / (success+failure)`.
+
+- **GitHub**: Actions runs. `workflow` = workflow name, `conclusion` = run conclusion
+  (`success`, `failure`, `cancelled`, ...).
+- **GitLab**: pipelines. `workflow` = pipeline source (`push`, `schedule`,
+  `merge_request_event`, ...), `conclusion` = pipeline status (`success`, `failed`,
+  `canceled`, `skipped`).
 
 - **GitHub** captures posture from the existing GraphQL repo page at no extra API cost.
 - **GitLab** captures posture for **group** targets via a GraphQL sweep of the group's

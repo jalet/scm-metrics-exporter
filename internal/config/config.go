@@ -58,11 +58,13 @@ type GitHubConfig struct {
 // GitLabConfig holds GitLab provider settings. TargetType selects group (default) or
 // user; exactly the matching field (Group or User) must be set.
 type GitLabConfig struct {
-	TargetType string
-	Group      string
-	User       string
-	Token      string
-	BaseURL    string
+	TargetType       string
+	Group            string
+	User             string
+	Token            string
+	BaseURL          string
+	CollectWorkflows bool
+	WorkflowLookback time.Duration
 }
 
 // Load reads and validates the configuration for the given provider. It fails fast
@@ -101,11 +103,15 @@ func Load(providerName string) (Config, error) {
 		}
 	case "gitlab":
 		cfg.GitLab = GitLabConfig{
-			TargetType: getenvDefault("GITLAB_TARGET_TYPE", TargetGroup),
-			Group:      os.Getenv("GITLAB_GROUP"),
-			User:       os.Getenv("GITLAB_USER"),
-			Token:      os.Getenv("GITLAB_TOKEN"),
-			BaseURL:    os.Getenv("GITLAB_URL"),
+			TargetType:       getenvDefault("GITLAB_TARGET_TYPE", TargetGroup),
+			Group:            os.Getenv("GITLAB_GROUP"),
+			User:             os.Getenv("GITLAB_USER"),
+			Token:            os.Getenv("GITLAB_TOKEN"),
+			BaseURL:          os.Getenv("GITLAB_URL"),
+			CollectWorkflows: os.Getenv("GITLAB_COLLECT_WORKFLOWS") == "true",
+		}
+		if cfg.GitLab.WorkflowLookback, err = getenvDuration("GITLAB_WORKFLOW_LOOKBACK", 0); err != nil {
+			return Config{}, err
 		}
 		if err := cfg.GitLab.validate(); err != nil {
 			return Config{}, err

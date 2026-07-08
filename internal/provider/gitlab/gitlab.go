@@ -49,16 +49,25 @@ type Options struct {
 	GraphQLURL      string
 	Bearer          bool
 	IncludeArchived bool
-	HTTPClient      *http.Client
+	// CollectWorkflows enables recent pipeline collection in SnapshotRepo.
+	CollectWorkflows bool
+	// WorkflowLookback bounds how far back pipelines are counted (default 7 days).
+	WorkflowLookback time.Duration
+	HTTPClient       *http.Client
 }
 
 // Provider polls a GitLab group or user for review items and security findings.
 type Provider struct {
-	rest       *restClient
-	graphql    *graphqlClient
-	targetType string
-	maxPages   int
+	rest             *restClient
+	graphql          *graphqlClient
+	targetType       string
+	maxPages         int
+	collectWorkflows bool
+	workflowLookback time.Duration
 }
+
+// defaultWorkflowLookback bounds recent pipeline collection when unset.
+const defaultWorkflowLookback = 7 * 24 * time.Hour
 
 var _ provider.Provider = (*Provider)(nil)
 
@@ -82,11 +91,17 @@ func New(opts Options) (*Provider, error) {
 	if targetType == "" {
 		targetType = targetGroup
 	}
+	lookback := opts.WorkflowLookback
+	if lookback <= 0 {
+		lookback = defaultWorkflowLookback
+	}
 	return &Provider{
-		rest:       &restClient{httpClient: httpClient, apiBase: apiBase, includeArchived: opts.IncludeArchived},
-		graphql:    &graphqlClient{httpClient: httpClient, endpoint: gqlEndpoint},
-		targetType: targetType,
-		maxPages:   defaultMaxPages,
+		rest:             &restClient{httpClient: httpClient, apiBase: apiBase, includeArchived: opts.IncludeArchived},
+		graphql:          &graphqlClient{httpClient: httpClient, endpoint: gqlEndpoint},
+		targetType:       targetType,
+		maxPages:         defaultMaxPages,
+		collectWorkflows: opts.CollectWorkflows,
+		workflowLookback: lookback,
 	}, nil
 }
 

@@ -5,10 +5,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
+	"time"
+
+	zlog "github.com/rs/zerolog/log"
 
 	"github.com/jalet/scm-metrics-exporter/internal/provider"
 )
+
+// terminalPipelineStatuses are the GitLab pipeline statuses counted as outcomes; transient
+// states (pending, running, created, ...) are skipped, mirroring GitHub's skip of
+// in-progress runs.
+var terminalPipelineStatuses = map[string]bool{
+	"success": true, "failed": true, "canceled": true, "skipped": true,
+}
 
 var _ provider.RepoSnapshotter = (*Provider)(nil)
 
@@ -119,7 +130,56 @@ func (p *Provider) SnapshotRepo(ctx context.Context, _, repo string) (provider.S
 	if vulnErr != nil || postErr != nil {
 		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceGraphQL})
 	}
+	// Pipeline collection is opt-in and supplementary: never fatal, a failure is recorded.
+	if p.collectWorkflows {
+		if stats, plErr := p.collectPipelineRuns(ctx, repo); plErr != nil {
+			snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceWorkflows})
+		} else if len(snap.Repos) > 0 {
+			snap.Repos[0].WorkflowRuns = stats
+		}
+	}
 	return snap, nil
+}
+
+// collectPipelineRuns tallies one project's recent pipelines within the lookback window,
+// grouped by (source, status). GitLab has no per-run "workflow name", so the pipeline
+// source (push, schedule, merge_request_event, ...) is used as the workflow label and the
+// pipeline status as the conclusion. Transient statuses are skipped; pagination is bounded.
+func (p *Provider) collectPipelineRuns(ctx context.Context, path string) ([]provider.WorkflowRunStat, error) {
+	since := time.Now().Add(-p.workflowLookback).UTC().Format(time.RFC3339)
+	base := fmt.Sprintf("/projects/%s/pipelines?updated_after=%s&per_page=100", escapeGroup(path), url.QueryEscape(since))
+	tally := map[string]map[string]int{} // source -> status -> count
+	for page, next := 0, "1"; next != "" && page < p.maxPages; page++ {
+		body, nextPage, _, _, err := p.rest.getPage(ctx, base+"&page="+next)
+		if err != nil {
+			return nil, err
+		}
+		var pipelines []struct {
+			Status string `json:"status"`
+			Source string `json:"source"`
+		}
+		if err := json.Unmarshal(body, &pipelines); err != nil {
+			return nil, fmt.Errorf("gitlab rest: decode pipelines: %w", err)
+		}
+		for _, pl := range pipelines {
+			status := strings.ToLower(pl.Status)
+			if !terminalPipelineStatuses[status] {
+				continue
+			}
+			source := pl.Source
+			if source == "" {
+				source = "unknown"
+			}
+			if tally[source] == nil {
+				tally[source] = map[string]int{}
+			}
+			tally[source][status]++
+		}
+		next = nextPage
+	}
+	zlog.Debug().Str("provider", "gitlab").Str("source", "workflows").Str("project", path).
+		Int("sources", len(tally)).Msg("pipelines collected")
+	return provider.WorkflowRunStatsFromTally(tally), nil
 }
 
 // collectRepoMRs counts one project's open merge requests across pages.

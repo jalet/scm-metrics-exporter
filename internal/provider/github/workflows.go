@@ -2,7 +2,6 @@ package github
 
 import (
 	"context"
-	"slices"
 	"strings"
 	"time"
 
@@ -49,23 +48,7 @@ func (p *Provider) collectWorkflowRuns(ctx context.Context, owner, repo string) 
 		opts.Page = resp.NextPage
 	}
 
-	stats := make([]provider.WorkflowRunStat, 0, len(tally))
-	names := make([]string, 0, len(tally))
-	for n := range tally {
-		names = append(names, n)
-	}
-	slices.Sort(names)
-	for _, n := range names {
-		conclusions := make([]string, 0, len(tally[n]))
-		for c := range tally[n] {
-			conclusions = append(conclusions, c)
-		}
-		slices.Sort(conclusions)
-		for _, c := range conclusions {
-			stats = append(stats, provider.WorkflowRunStat{Workflow: n, Conclusion: c, Count: tally[n][c]})
-		}
-	}
 	zlog.Debug().Str("provider", "github").Str("source", "workflows").Str("repo", owner+"/"+repo).
 		Int("workflows", len(tally)).Int("runs", total).Msg("workflow runs collected")
-	return stats, nil
+	return provider.WorkflowRunStatsFromTally(tally), nil
 }

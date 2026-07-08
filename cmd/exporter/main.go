@@ -123,9 +123,11 @@ func buildProvider(cfg config.Config, repo string) (provider.Provider, error) {
 		return p, nil
 	case "gitlab":
 		p, err := providergitlab.New(providergitlab.Options{
-			Token:      cfg.GitLab.Token,
-			TargetType: cfg.GitLab.TargetType,
-			BaseURL:    cfg.GitLab.BaseURL,
+			Token:            cfg.GitLab.Token,
+			TargetType:       cfg.GitLab.TargetType,
+			BaseURL:          cfg.GitLab.BaseURL,
+			CollectWorkflows: cfg.GitLab.CollectWorkflows,
+			WorkflowLookback: cfg.GitLab.WorkflowLookback,
 		})
 		if err != nil {
 			return nil, err

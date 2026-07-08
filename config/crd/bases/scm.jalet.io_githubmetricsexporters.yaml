@@ -162,9 +162,9 @@ spec:
                 type: string
               collectWorkflows:
                 description: |-
-                  CollectWorkflows enables recent GitHub Actions workflow-run metrics
-                  (scm_workflow_runs_recent), tallied per collection Job. Off by default because it
-                  adds an API call per repository and extra series cardinality.
+                  CollectWorkflows enables recent CI-run metrics (scm_workflow_runs_recent): GitHub
+                  Actions workflow runs, or GitLab pipelines. Off by default because it adds an API
+                  call per repository and extra series cardinality.
                 type: boolean
               credentialsSecret:
                 description: |-
@@ -309,8 +309,8 @@ spec:
               workflowLookback:
                 default: 168h
                 description: |-
-                  WorkflowLookback bounds how far back workflow runs are counted (used when
-                  CollectWorkflows is true).
+                  WorkflowLookback bounds how far back CI runs are counted (used when CollectWorkflows
+                  is true).
                 type: string
             required:
             - authMode

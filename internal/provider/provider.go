@@ -16,6 +16,7 @@ package provider
 
 import (
 	"context"
+	"slices"
 	"strings"
 )
 
@@ -88,6 +89,29 @@ type WorkflowRunStat struct {
 	Conclusion string
 	// Count is the number of runs with this (workflow, conclusion) in the lookback window.
 	Count int
+}
+
+// WorkflowRunStatsFromTally flattens a workflow -> conclusion -> count tally into a slice
+// sorted by workflow then conclusion, for a stable, low-cardinality series set. Providers
+// build the tally while paging their CI runs.
+func WorkflowRunStatsFromTally(tally map[string]map[string]int) []WorkflowRunStat {
+	stats := make([]WorkflowRunStat, 0, len(tally))
+	workflows := make([]string, 0, len(tally))
+	for w := range tally {
+		workflows = append(workflows, w)
+	}
+	slices.Sort(workflows)
+	for _, w := range workflows {
+		conclusions := make([]string, 0, len(tally[w]))
+		for c := range tally[w] {
+			conclusions = append(conclusions, c)
+		}
+		slices.Sort(conclusions)
+		for _, c := range conclusions {
+			stats = append(stats, WorkflowRunStat{Workflow: w, Conclusion: c, Count: tally[w][c]})
+		}
+	}
+	return stats
 }
 
 // RepoPosture is a repository's security-configuration snapshot. Some fields are
