@@ -92,8 +92,8 @@ spec:
                 properties:
                   exclude:
                     description: |-
-                      Exclude removes repositories from the Include set. Reserved: the schema is stable but
-                      exclusion is not yet enforced.
+                      Exclude removes repositories from the Include set. An empty Exclude removes nothing;
+                      a repository is dropped when it matches every set criterion of Exclude (ANDed).
                     properties:
                       archived:
                         description: |-
@@ -477,8 +477,8 @@ spec:
                 properties:
                   exclude:
                     description: |-
-                      Exclude removes repositories from the Include set. Reserved: the schema is stable but
-                      exclusion is not yet enforced.
+                      Exclude removes repositories from the Include set. An empty Exclude removes nothing;
+                      a repository is dropped when it matches every set criterion of Exclude (ANDed).
                     properties:
                       archived:
                         description: |-

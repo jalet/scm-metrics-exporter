@@ -29,19 +29,20 @@ func TestListGitLabProjectsFilters(t *testing.T) {
 	auth := GitLabAuth{Token: "glpat", HTTPClient: srv.Client(), BaseURL: srv.URL}
 
 	cases := []struct {
-		name   string
-		filter Filter
-		want   []string
+		name string
+		sel  Selector
+		want []string
 	}{
-		{"no filter", Filter{}, []string{"acme/svc-a", "acme/web", "acme/legacy"}},
-		{"visibility private", Filter{Visibility: []string{"private"}}, []string{"acme/svc-a", "acme/legacy"}},
-		{"topic go", Filter{Topics: []string{"go"}}, []string{"acme/svc-a", "acme/legacy"}},
-		{"name glob", Filter{NamePatterns: []string{"acme/svc-*"}}, []string{"acme/svc-a"}},
-		{"non-archived", Filter{Archived: ptr.To(false)}, []string{"acme/svc-a", "acme/web"}},
+		{"empty", Selector{}, []string{"acme/svc-a", "acme/web", "acme/legacy"}},
+		{"include visibility private", Selector{Include: Filter{Visibility: []string{"private"}}}, []string{"acme/svc-a", "acme/legacy"}},
+		{"include topic go", Selector{Include: Filter{Topics: []string{"go"}}}, []string{"acme/svc-a", "acme/legacy"}},
+		{"include name glob", Selector{Include: Filter{NamePatterns: []string{"acme/svc-*"}}}, []string{"acme/svc-a"}},
+		{"exclude archived", Selector{Exclude: Filter{Archived: ptr.To(true)}}, []string{"acme/svc-a", "acme/web"}},
+		{"include go minus archived", Selector{Include: Filter{Topics: []string{"go"}}, Exclude: Filter{Archived: ptr.To(true)}}, []string{"acme/svc-a"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ListGitLabProjects(context.Background(), auth, "acme", "group", tc.filter)
+			got, err := ListGitLabProjects(context.Background(), auth, "acme", "group", tc.sel)
 			if err != nil {
 				t.Fatalf("ListGitLabProjects: %v", err)
 			}
@@ -53,7 +54,7 @@ func TestListGitLabProjectsFilters(t *testing.T) {
 }
 
 func TestListGitLabProjectsNoCredentials(t *testing.T) {
-	if _, err := ListGitLabProjects(context.Background(), GitLabAuth{}, "acme", "group", Filter{}); err == nil {
+	if _, err := ListGitLabProjects(context.Background(), GitLabAuth{}, "acme", "group", Selector{}); err == nil {
 		t.Fatal("ListGitLabProjects with no token: got nil error, want failure")
 	}
 }

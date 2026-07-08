@@ -128,8 +128,14 @@ spec:
     include:
       visibility: [private, internal]
       namePatterns: ["service-*"]
-      archived: false
+    exclude:                      # removed from the include set; empty excludes nothing
+      archived: true
+      topics: [deprecated]
 ```
+
+`autoDiscover.include` picks the candidate repositories (empty matches all); `exclude` then
+drops any repo that matches every criterion it sets. Criteria within a block are ANDed;
+`namePatterns` are shell globs (GitHub matches the bare name, GitLab the full path).
 
 **GitHub, App auth:** create a Secret with the App private key (PEM), then:
 

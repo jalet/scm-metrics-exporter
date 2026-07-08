@@ -51,14 +51,20 @@ func needsDiscovery(last *metav1.Time, count int, interval time.Duration) bool {
 	return time.Since(last.Time) >= interval
 }
 
-// includeFilter maps the CR's include-filter block to a discovery.Filter. Exclude is
-// reserved and not yet applied.
-func includeFilter(a scmv1alpha1.AutoDiscover) discovery.Filter {
+// selectorFrom maps the CR's autoDiscover block to a discovery.Selector (include + exclude).
+func selectorFrom(a scmv1alpha1.AutoDiscover) discovery.Selector {
+	return discovery.Selector{
+		Include: filterFrom(a.Include),
+		Exclude: filterFrom(a.Exclude),
+	}
+}
+
+func filterFrom(f scmv1alpha1.RepoFilter) discovery.Filter {
 	return discovery.Filter{
-		Topics:       a.Include.Topics,
-		Visibility:   a.Include.Visibility,
-		NamePatterns: a.Include.NamePatterns,
-		Archived:     a.Include.Archived,
+		Topics:       f.Topics,
+		Visibility:   f.Visibility,
+		NamePatterns: f.NamePatterns,
+		Archived:     f.Archived,
 	}
 }
 

@@ -23,11 +23,11 @@ type GitLabMetricsExporterReconciler struct {
 	ExporterImage string
 	// DiscoverProjects lists the target's project paths. Defaults to live GitLab discovery
 	// and is overridable in tests so reconciliation needs no network.
-	DiscoverProjects func(ctx context.Context, auth discovery.GitLabAuth, target, targetType string, f discovery.Filter) ([]string, error)
+	DiscoverProjects func(ctx context.Context, auth discovery.GitLabAuth, target, targetType string, sel discovery.Selector) ([]string, error)
 }
 
-func discoverGitLabProjects(ctx context.Context, auth discovery.GitLabAuth, target, targetType string, f discovery.Filter) ([]string, error) {
-	return discovery.ListGitLabProjects(ctx, auth, target, targetType, f)
+func discoverGitLabProjects(ctx context.Context, auth discovery.GitLabAuth, target, targetType string, sel discovery.Selector) ([]string, error) {
+	return discovery.ListGitLabProjects(ctx, auth, target, targetType, sel)
 }
 
 // +kubebuilder:rbac:groups=scm.jalet.io,resources=gitlabmetricsexporters,verbs=get;list;watch;create;update;patch;delete
@@ -54,7 +54,7 @@ func (r *GitLabMetricsExporterReconciler) Reconcile(ctx context.Context, req ctr
 	}
 	repos := cr.Status.DiscoveredRepositories
 	if needsDiscovery(cr.Status.LastDiscoveryTime, len(repos), cr.Spec.DiscoveryInterval.Duration) {
-		newRepos, derr := discover(ctx, auth, target, cr.Spec.TargetType, includeFilter(cr.Spec.AutoDiscover))
+		newRepos, derr := discover(ctx, auth, target, cr.Spec.TargetType, selectorFrom(cr.Spec.AutoDiscover))
 		if derr != nil {
 			setReadyCondition(&cr.Status.Conditions, cr.Generation, metav1.ConditionFalse, reasonDiscoveryFailed, derr.Error())
 			return r.updateStatus(ctx, &cr, ctrl.Result{RequeueAfter: credentialRequeue})

@@ -210,12 +210,12 @@ Rough epic decomposition (sequenced in the implementation plan):
 
 Deferred to later phases:
 
-- `autodiscover.exclude` implementation.
 - E21 workflow-run metrics ride on top as one more signal the per-repo collector
   gathers (no longer a standalone architecture problem).
 
 Done after the initial GitHub-only build: GitLab discovery/dispatch (group/user project
-discovery -> per-project Jobs; single-project `SnapshotRepo`; group/personal token).
+discovery -> per-project Jobs; single-project `SnapshotRepo`; group/personal token); and
+`autoDiscover.exclude` (a repo is dropped when the non-empty exclude filter matches).
 
 ## 12. Open questions
 

@@ -20,7 +20,7 @@ func newGitLabReconciler(repos ...string) *GitLabMetricsExporterReconciler {
 		Client:        k8sClient,
 		Scheme:        k8sClient.Scheme(),
 		ExporterImage: testImage,
-		DiscoverProjects: func(context.Context, discovery.GitLabAuth, string, string, discovery.Filter) ([]string, error) {
+		DiscoverProjects: func(context.Context, discovery.GitLabAuth, string, string, discovery.Selector) ([]string, error) {
 			return repos, nil
 		},
 	}

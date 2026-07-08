@@ -26,9 +26,9 @@ type GitLabAuth struct {
 }
 
 // ListGitLabProjects returns the full paths (path_with_namespace) of the target's projects
-// that pass the filter. targetType is "group" (default, includes subgroups) or "user".
+// that pass the selector. targetType is "group" (default, includes subgroups) or "user".
 // NamePatterns match against the full path (for example "team/*").
-func ListGitLabProjects(ctx context.Context, auth GitLabAuth, target, targetType string, f Filter) ([]string, error) {
+func ListGitLabProjects(ctx context.Context, auth GitLabAuth, target, targetType string, sel Selector) ([]string, error) {
 	client, err := gitlabHTTPClient(auth)
 	if err != nil {
 		return nil, err
@@ -59,7 +59,7 @@ func ListGitLabProjects(ctx context.Context, auth GitLabAuth, target, targetType
 			return nil, err
 		}
 		for _, pr := range projects {
-			if pr.PathWithNamespace != "" && matchesGitLab(pr, f) {
+			if pr.PathWithNamespace != "" && sel.selects(func(f Filter) bool { return matchesGitLab(pr, f) }) {
 				out = append(out, pr.PathWithNamespace)
 			}
 		}

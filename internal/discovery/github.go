@@ -42,6 +42,32 @@ type Filter struct {
 	Archived     *bool
 }
 
+// isEmpty reports whether the filter has no criteria.
+func (f Filter) isEmpty() bool {
+	return len(f.Topics) == 0 && len(f.Visibility) == 0 && len(f.NamePatterns) == 0 && f.Archived == nil
+}
+
+// Selector chooses repositories: Include picks the candidate set (an empty Include matches
+// every repository), then Exclude removes any repository it matches. An empty Exclude
+// removes nothing (unlike a filter, which matches everything when empty), so exclusion is
+// guarded on the exclude filter being non-empty.
+type Selector struct {
+	Include Filter
+	Exclude Filter
+}
+
+// selects reports whether a repository with the given attributes passes the selector.
+// matched is the per-provider include/exclude test (matches against that provider's repo).
+func (s Selector) selects(matched func(Filter) bool) bool {
+	if !matched(s.Include) {
+		return false
+	}
+	if !s.Exclude.isEmpty() && matched(s.Exclude) {
+		return false
+	}
+	return true
+}
+
 // NewGitHubClient builds a go-github REST client for discovery from auth.
 func NewGitHubClient(auth GitHubAuth) (*gh.Client, error) {
 	httpClient, token, err := transport(auth)
@@ -89,9 +115,9 @@ func transport(auth GitHubAuth) (httpClient *http.Client, token string, err erro
 	}
 }
 
-// ListRepos returns the names of the target's repositories that pass the filter, sorted
-// for a stable inventory. targetType is "org" (default) or "user".
-func ListRepos(ctx context.Context, client *gh.Client, owner, targetType string, f Filter) ([]string, error) {
+// ListRepos returns the names of the target's repositories that pass the selector.
+// targetType is "org" (default) or "user".
+func ListRepos(ctx context.Context, client *gh.Client, owner, targetType string, sel Selector) ([]string, error) {
 	var out []string
 	if targetType == "user" {
 		opts := &gh.RepositoryListByUserOptions{Type: "owner"}
@@ -101,7 +127,7 @@ func ListRepos(ctx context.Context, client *gh.Client, owner, targetType string,
 			if err != nil {
 				return nil, fmt.Errorf("discovery: list user %q repos: %w", owner, err)
 			}
-			out = appendMatching(out, repos, f)
+			out = appendMatching(out, repos, sel)
 			if resp == nil || resp.NextPage == 0 {
 				return out, nil
 			}
@@ -116,7 +142,7 @@ func ListRepos(ctx context.Context, client *gh.Client, owner, targetType string,
 		if err != nil {
 			return nil, fmt.Errorf("discovery: list org %q repos: %w", owner, err)
 		}
-		out = appendMatching(out, repos, f)
+		out = appendMatching(out, repos, sel)
 		if resp == nil || resp.NextPage == 0 {
 			return out, nil
 		}
@@ -125,9 +151,9 @@ func ListRepos(ctx context.Context, client *gh.Client, owner, targetType string,
 	return out, nil
 }
 
-func appendMatching(out []string, repos []*gh.Repository, f Filter) []string {
+func appendMatching(out []string, repos []*gh.Repository, sel Selector) []string {
 	for _, r := range repos {
-		if r.GetName() != "" && matches(r, f) {
+		if r.GetName() != "" && sel.selects(func(f Filter) bool { return matches(r, f) }) {
 			out = append(out, r.GetName())
 		}
 	}

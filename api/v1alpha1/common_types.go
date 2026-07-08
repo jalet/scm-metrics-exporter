@@ -71,8 +71,8 @@ type AutoDiscover struct {
 	// +optional
 	Include RepoFilter `json:"include,omitempty"`
 
-	// Exclude removes repositories from the Include set. Reserved: the schema is stable but
-	// exclusion is not yet enforced.
+	// Exclude removes repositories from the Include set. An empty Exclude removes nothing;
+	// a repository is dropped when it matches every set criterion of Exclude (ANDed).
 	// +optional
 	Exclude RepoFilter `json:"exclude,omitempty"`
 }

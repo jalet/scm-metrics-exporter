@@ -25,16 +25,16 @@ type GitHubMetricsExporterReconciler struct {
 	ExporterImage string
 	// DiscoverRepos lists the target's repositories. It defaults to live GitHub discovery
 	// and is overridable in tests so reconciliation needs no network.
-	DiscoverRepos func(ctx context.Context, auth discovery.GitHubAuth, owner, targetType string, f discovery.Filter) ([]string, error)
+	DiscoverRepos func(ctx context.Context, auth discovery.GitHubAuth, owner, targetType string, sel discovery.Selector) ([]string, error)
 }
 
 // discoverGitHubRepos is the default DiscoverRepos: build a client and list repositories.
-func discoverGitHubRepos(ctx context.Context, auth discovery.GitHubAuth, owner, targetType string, f discovery.Filter) ([]string, error) {
+func discoverGitHubRepos(ctx context.Context, auth discovery.GitHubAuth, owner, targetType string, sel discovery.Selector) ([]string, error) {
 	c, err := discovery.NewGitHubClient(auth)
 	if err != nil {
 		return nil, err
 	}
-	return discovery.ListRepos(ctx, c, owner, targetType, f)
+	return discovery.ListRepos(ctx, c, owner, targetType, sel)
 }
 
 // +kubebuilder:rbac:groups=scm.jalet.io,resources=githubmetricsexporters,verbs=get;list;watch;create;update;patch;delete
@@ -66,7 +66,7 @@ func (r *GitHubMetricsExporterReconciler) Reconcile(ctx context.Context, req ctr
 	}
 	repos := cr.Status.DiscoveredRepositories
 	if needsDiscovery(cr.Status.LastDiscoveryTime, len(repos), cr.Spec.DiscoveryInterval.Duration) {
-		newRepos, derr := discover(ctx, auth, owner, cr.Spec.TargetType, includeFilter(cr.Spec.AutoDiscover))
+		newRepos, derr := discover(ctx, auth, owner, cr.Spec.TargetType, selectorFrom(cr.Spec.AutoDiscover))
 		if derr != nil {
 			setReadyCondition(&cr.Status.Conditions, cr.Generation, metav1.ConditionFalse, reasonDiscoveryFailed, derr.Error())
 			return r.updateStatus(ctx, &cr, ctrl.Result{RequeueAfter: credentialRequeue})

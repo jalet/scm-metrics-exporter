@@ -31,21 +31,23 @@ func TestListReposFilters(t *testing.T) {
 	}
 
 	cases := []struct {
-		name   string
-		filter Filter
-		want   []string
+		name string
+		sel  Selector
+		want []string
 	}{
-		{"no filter matches all", Filter{}, []string{"svc-api", "svc-web", "legacy"}},
-		{"visibility private", Filter{Visibility: []string{"private"}}, []string{"svc-api", "legacy"}},
-		{"topic go", Filter{Topics: []string{"go"}}, []string{"svc-api", "legacy"}},
-		{"name glob svc-*", Filter{NamePatterns: []string{"svc-*"}}, []string{"svc-api", "svc-web"}},
-		{"archived only", Filter{Archived: ptr.To(true)}, []string{"legacy"}},
-		{"non-archived", Filter{Archived: ptr.To(false)}, []string{"svc-api", "svc-web"}},
-		{"ANDed criteria", Filter{Visibility: []string{"private"}, Archived: ptr.To(false)}, []string{"svc-api"}},
+		{"empty selector matches all", Selector{}, []string{"svc-api", "svc-web", "legacy"}},
+		{"include visibility private", Selector{Include: Filter{Visibility: []string{"private"}}}, []string{"svc-api", "legacy"}},
+		{"include topic go", Selector{Include: Filter{Topics: []string{"go"}}}, []string{"svc-api", "legacy"}},
+		{"include name glob svc-*", Selector{Include: Filter{NamePatterns: []string{"svc-*"}}}, []string{"svc-api", "svc-web"}},
+		{"include archived only", Selector{Include: Filter{Archived: ptr.To(true)}}, []string{"legacy"}},
+		{"include ANDed", Selector{Include: Filter{Visibility: []string{"private"}, Archived: ptr.To(false)}}, []string{"svc-api"}},
+		{"exclude archived", Selector{Exclude: Filter{Archived: ptr.To(true)}}, []string{"svc-api", "svc-web"}},
+		{"exclude topic js", Selector{Exclude: Filter{Topics: []string{"js"}}}, []string{"svc-api", "legacy"}},
+		{"include topic go minus archived", Selector{Include: Filter{Topics: []string{"go"}}, Exclude: Filter{Archived: ptr.To(true)}}, []string{"svc-api"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ListRepos(context.Background(), client, "acme", "org", tc.filter)
+			got, err := ListRepos(context.Background(), client, "acme", "org", tc.sel)
 			if err != nil {
 				t.Fatalf("ListRepos: %v", err)
 			}

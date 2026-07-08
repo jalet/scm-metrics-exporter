@@ -61,8 +61,8 @@ func runEnvtest(m *testing.M) int {
 }
 
 // stubDiscover returns a fixed repository list, so reconciliation needs no network.
-func stubDiscover(repos ...string) func(context.Context, discovery.GitHubAuth, string, string, discovery.Filter) ([]string, error) {
-	return func(context.Context, discovery.GitHubAuth, string, string, discovery.Filter) ([]string, error) {
+func stubDiscover(repos ...string) func(context.Context, discovery.GitHubAuth, string, string, discovery.Selector) ([]string, error) {
+	return func(context.Context, discovery.GitHubAuth, string, string, discovery.Selector) ([]string, error) {
 		return repos, nil
 	}
 }
