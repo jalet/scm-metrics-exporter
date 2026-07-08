@@ -41,11 +41,19 @@ package ecosystem) and `tool` (scanning tool) labels are added to
 
 `scm_repo_info` is a constant `1` carrying each repository's security posture on its
 labels (the info-metric pattern; join it against the other series by `provider,repo`).
-GitHub captures posture from the existing GraphQL page at no extra API cost:
-`visibility` (`public`/`private`/`internal`), `archived`, `branch_protected` (the
-default branch has a protection rule), and `dependabot_enabled`. Some fields are
-admin-gated, so a token without admin access may report them as `false`. GitLab does
-not emit `scm_repo_info` yet.
+`visibility` is `public`/`private`/`internal`, `branch_protected` means the default
+branch has a protection rule, and `dependabot_enabled` means automated
+dependency-vulnerability alerting is on (GitHub Dependabot alerts, or GitLab dependency
+scanning). Some fields are admin-gated, so a token without the required access may report
+them as `false`.
+
+- **GitHub** captures posture from the existing GraphQL repo page at no extra API cost.
+- **GitLab** captures posture for **group** targets via a GraphQL sweep of the group's
+  projects (visibility, archived, default-branch `branchRules`, and `securityScanners`);
+  **user** targets emit MR counts only, so they carry no `scm_repo_info`.
+
+Example: repos in an org missing branch protection --
+`scm_repo_info{branch_protected="false"}`.
 
 ## Components
 

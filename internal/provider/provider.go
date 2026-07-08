@@ -67,7 +67,8 @@ type RepoPosture struct {
 	Visibility string
 	// Archived reports whether the repository is archived.
 	Archived bool
-	// DependabotEnabled reports whether Dependabot vulnerability alerts are enabled.
+	// DependabotEnabled reports whether automated dependency-vulnerability alerting is
+	// enabled: GitHub Dependabot alerts, or GitLab dependency scanning.
 	DependabotEnabled bool
 	// BranchProtected reports whether the default branch has a branch-protection rule.
 	BranchProtected bool
