@@ -121,9 +121,15 @@ func setupLogging() {
 	if os.Getenv("LOG_FORMAT") == "console" {
 		zlog.Logger = zlog.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 	}
+	// Default to info: poll summaries and warnings are visible, while the noisier
+	// per-page provider progress is opt-in via LOG_LEVEL=debug.
+	level := zerolog.InfoLevel
 	if raw := os.Getenv("LOG_LEVEL"); raw != "" {
 		if lvl, err := zerolog.ParseLevel(raw); err == nil {
-			zerolog.SetGlobalLevel(lvl)
+			level = lvl
+		} else {
+			zlog.Warn().Str("LOG_LEVEL", raw).Msg("invalid LOG_LEVEL; using info")
 		}
 	}
+	zerolog.SetGlobalLevel(level)
 }

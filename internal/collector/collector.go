@@ -102,20 +102,47 @@ func (c *Collector) pollAll(ctx context.Context, onScrapeError func(providerName
 // recorded and the (possibly partial) snapshot is cached.
 func (c *Collector) pollOne(ctx context.Context, e Entry, onScrapeError func(providerName, source string)) {
 	name := e.Provider.Name()
+	zlog.Debug().Str("provider", name).Str("target", e.Target).Msg("polling provider")
+
+	start := time.Now()
 	snap, err := e.Provider.Snapshot(ctx, e.Target)
+	elapsed := time.Since(start)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return // shutting down; keep last snapshot, not a fault
 		}
-		zlog.Warn().Err(err).Str("provider", name).Str("target", e.Target).
+		zlog.Warn().Err(err).Str("provider", name).Str("target", e.Target).Dur("elapsed", elapsed).
 			Msg("provider snapshot failed; keeping last snapshot")
 		onScrapeError(name, "")
 		return
 	}
+	// Per-source failures are logged with their cause inside the provider; here we
+	// just feed the scrape-error counter. The summary below records the count.
 	for _, se := range snap.SourceErrors {
 		onScrapeError(name, se.Source)
 	}
+
+	reviewItems, findings := summarize(snap)
+	zlog.Info().
+		Str("provider", name).
+		Str("target", e.Target).
+		Int("repos", len(snap.Repos)).
+		Int("open_review_items", reviewItems).
+		Int("findings", findings).
+		Int("source_errors", len(snap.SourceErrors)).
+		Dur("elapsed", elapsed).
+		Msg("poll complete")
 	c.store(name, snap)
+}
+
+// summarize totals the open review items and findings across a snapshot's repos for
+// the poll-complete log line.
+func summarize(s provider.Snapshot) (reviewItems, findings int) {
+	for _, r := range s.Repos {
+		reviewItems += r.OpenReviewItems
+		findings += len(r.Findings)
+	}
+	return reviewItems, findings
 }
 
 // cloneSnapshot deep-copies the slices in s so a caller of Latest cannot mutate

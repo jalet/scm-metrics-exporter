@@ -140,10 +140,16 @@ func (p *Provider) collectGraphQL(ctx context.Context, org string) (graphqlResul
 
 		res.rateRemaining = gr.Data.RateLimit.Remaining
 		res.rateKnown = true
-		res.repos = append(res.repos, mapGraphQLRepos(gr)...)
+		pageRepos := mapGraphQLRepos(gr)
+		res.repos = append(res.repos, pageRepos...)
+		zlog.Debug().Str("provider", "github").Str("source", "graphql").Str("org", org).
+			Int("page", page).Int("repos_in_page", len(pageRepos)).Int("repos_total", len(res.repos)).
+			Int64("rate_remaining", res.rateRemaining).Msg("fetched repositories page")
 
 		pi := gr.Data.Organization.Repositories.PageInfo
 		if !pi.HasNextPage {
+			zlog.Debug().Str("provider", "github").Str("source", "graphql").Str("org", org).
+				Int("repos", len(res.repos)).Int("pages", page+1).Msg("graphql collection complete")
 			return res, nil
 		}
 		cursor = &pi.EndCursor

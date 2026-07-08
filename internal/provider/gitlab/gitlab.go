@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/failsafe-go/failsafe-go/failsafehttp"
+	zlog "github.com/rs/zerolog/log"
 
 	"github.com/jalet/scm-metrics-exporter/internal/provider"
 )
@@ -96,11 +97,18 @@ func (p *Provider) Snapshot(ctx context.Context, group string) (provider.Snapsho
 		snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceGraphQL, Remaining: vuln.rate})
 	}
 	if restErr != nil {
+		zlog.Warn().Err(restErr).Str("provider", "gitlab").Str("source", provider.SourceREST).Str("target", group).
+			Msg("source failed; snapshot is partial")
 		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceREST})
 	}
 	if vulnErr != nil {
+		zlog.Warn().Err(vulnErr).Str("provider", "gitlab").Str("source", provider.SourceGraphQL).Str("target", group).
+			Msg("source failed; snapshot is partial")
 		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceGraphQL})
 	}
+	zlog.Debug().Str("provider", "gitlab").Str("target", group).
+		Int("repos", len(snap.Repos)).Int("rate_limits", len(snap.RateLimits)).
+		Msg("gitlab snapshot assembled")
 	return snap, nil
 }
 
