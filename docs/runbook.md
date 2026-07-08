@@ -20,44 +20,51 @@ kubectl rollout status deploy/scm-metrics-exporter -n scm-system
 kubectl logs deploy/scm-metrics-exporter -n scm-system | grep "starting manager"
 ```
 
-## Onboard a repository target
+## Onboard a target
 
-1. Create the credentials Secret (PAT under `token`, or the App PEM under `app.pem`).
-2. Apply a `GitHubMetricsExporter` referencing it (see the README examples).
-3. Confirm the exporter came up:
+1. Create the credentials Secret (PAT under `token`, or the App PEM under `app.pem`; a
+   GitLab access token under `token`).
+2. Apply a `GitHubMetricsExporter` or `GitLabMetricsExporter` referencing it, with
+   `spec.export.otlpEndpoint` pointing at your OTLP collector (see the README examples).
+3. Confirm discovery ran and collection Jobs were dispatched:
 
 ```sh
-kubectl get ghme,deploy,svc -n scm-system -l app.kubernetes.io/managed-by=scm-metrics-operator
-kubectl describe ghme <name> -n scm-system   # Ready condition
+kubectl describe ghme <name> -n scm-system   # Ready=True/Discovered; status.discoveredRepositories
+kubectl get jobs -n scm-system -l app.kubernetes.io/instance=<name>
 ```
+
+Metrics arrive at the OTLP collector, not on a scrape endpoint. Confirm ingestion there.
 
 ## Rotate credentials
 
-The exporter reads the Secret at pod start (token via env, App key via a mounted
-file), so rotation requires a restart of the exporter pod.
+No restart is needed. The operator reads the Secret on each discovery cycle, and each
+collection Job reads it at start, so a rotated token takes effect on the next cycle
+(`spec.discoveryInterval`). To pick it up immediately, bump the CR (any annotation change)
+to force a reconcile.
 
 ```sh
 kubectl create secret generic <name> -n scm-system \
   --from-literal=token=ghp_new --dry-run=client -o yaml | kubectl apply -f -
-kubectl rollout restart deploy/<cr-name> -n scm-system
+kubectl annotate ghme <cr-name> -n scm-system scm.jalet.io/rotated="$(date +%s)" --overwrite
 ```
 
-## Diagnose scrape errors
+## Diagnose collection failures
 
-`scm_exporter_scrape_errors_total` rising means a data source failed. The exporter
-keeps serving the last good snapshot.
+- **CR `Ready=False` / `DiscoveryFailed`** -- the operator could not list repositories.
+  Check the credentials and that the token/App can see the target's repos/projects.
+- **CR `Ready=False` / `CredentialsInvalid`** -- the Secret is missing or lacks the key
+  named by `tokenKey` / `appPrivateKeyKey`.
+- **No metrics for a repo** -- inspect that repo's collection Job:
 
 ```sh
-kubectl logs deploy/<cr-name> -n scm-system | grep "source failed"
+kubectl logs -n scm-system job/<job-name>          # per-repo Job; grep "source failed"
+kubectl get jobs -n scm-system -l app.kubernetes.io/instance=<cr-name>
 ```
 
-- `source="graphql"` -- the PR / Dependabot query failed. A common cause is a token
-  lacking Dependabot-alerts read access (distinct from code-scanning access).
-- `source="rest"` -- code scanning failed, often because GitHub Advanced Security is
-  not enabled for the org, or the token lacks `security-events` access.
-
-A CR stuck `Ready=False` with reason `CredentialsInvalid` means the Secret is missing
-or lacks the key named by `tokenKey` / `appPrivateKeyKey`.
+`scm_exporter_scrape_errors_total` (by `source`) rises when a data source fails within a
+Job: `graphql` is often a token lacking Dependabot access, `rest` is code scanning access
+or the feature not enabled, `secret_scanning` is secret-scanning access. A failed source is
+partial -- the Job still pushes the other signals and exits 0.
 
 ## Upgrade CRDs
 
@@ -72,11 +79,16 @@ kubectl apply -f config/crd/bases/
 helm upgrade ... --set crds.enabled=false
 ```
 
-## Enable metrics scraping
+## Collect the metrics
 
-- Per-exporter: set `spec.serviceMonitor: true` on the CR; the operator creates a
-  ServiceMonitor selecting that exporter's Service (needs the prometheus-operator CRD).
-- The operator's own metrics: `--set serviceMonitor.enabled=true` at install.
+Collection Jobs push over OTLP -- there is no scrape endpoint. Point
+`spec.export.otlpEndpoint` at an OTLP metrics collector (or an OTLP-ingesting Prometheus)
+reachable from the Job pods; scrape/store from there. Freshness is bounded by
+`spec.discoveryInterval` (metrics are pushed once per cycle, per repo).
+
+The operator's own controller-runtime metrics are exposed on its pod
+(`metrics.bindAddress`, default `:8080`) for local inspection; the chart does not manage a
+scrape path for them.
 
 ## Cut a release
 
