@@ -30,6 +30,7 @@ per-provider custom resources into exporter Deployments.
 | `scm.security_findings.open` | gauge | provider, repo, severity, category | `scm_security_findings_open` |
 | `scm.api.rate_limit_remaining` | gauge | provider, resource | `scm_api_rate_limit_remaining` |
 | `scm.exporter.scrape_errors` | counter | provider, source | `scm_exporter_scrape_errors_total` |
+| `scm.repo.info` | gauge | provider, repo, visibility, archived, branch_protected, dependabot_enabled | `scm_repo_info` |
 
 `severity` is one of `critical`, `high`, `medium`, `low`, or `unknown` (GitHub
 secret-scanning alerts carry no severity). `category` is one of `dependency`,
@@ -37,6 +38,14 @@ secret-scanning alerts carry no severity). `category` is one of `dependency`,
 `secret_scanning`; `resource` is `graphql` or `rest`. Optional `ecosystem` (Dependabot
 package ecosystem) and `tool` (scanning tool) labels are added to
 `scm_security_findings_open` only when enabled via `SCM_FINDING_DIMENSIONS`.
+
+`scm_repo_info` is a constant `1` carrying each repository's security posture on its
+labels (the info-metric pattern; join it against the other series by `provider,repo`).
+GitHub captures posture from the existing GraphQL page at no extra API cost:
+`visibility` (`public`/`private`/`internal`), `archived`, `branch_protected` (the
+default branch has a protection rule), and `dependabot_enabled`. Some fields are
+admin-gated, so a token without admin access may report them as `false`. GitLab does
+not emit `scm_repo_info` yet.
 
 ## Components
 

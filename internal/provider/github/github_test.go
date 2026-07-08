@@ -101,15 +101,15 @@ func TestSnapshotMergesAndPaginates(t *testing.T) {
 
 	want := provider.Snapshot{
 		Repos: []provider.RepoMetrics{
-			{Name: "alpha", OpenReviewItems: 3, Findings: []provider.Finding{
+			{Name: "alpha", OpenReviewItems: 3, Posture: &provider.RepoPosture{}, Findings: []provider.Finding{
 				{Severity: "high", Category: "dependency"},
 				{Severity: "medium", Category: "dependency"}, // MODERATE normalized
 				{Severity: "high", Category: "static_analysis", Tool: "CodeQL"},
 			}},
-			{Name: "beta", OpenReviewItems: 0, Findings: []provider.Finding{
+			{Name: "beta", OpenReviewItems: 0, Posture: &provider.RepoPosture{}, Findings: []provider.Finding{
 				{Severity: "medium", Category: "static_analysis", Tool: "CodeQL"},
 			}},
-			{Name: "gamma", OpenReviewItems: 7, Findings: []provider.Finding{
+			{Name: "gamma", OpenReviewItems: 7, Posture: &provider.RepoPosture{}, Findings: []provider.Finding{
 				{Severity: "critical", Category: "dependency"},
 				{Severity: "critical", Category: "static_analysis", Tool: "CodeQL"},
 			}},
@@ -327,6 +327,31 @@ func TestMapGraphQLEcosystem(t *testing.T) {
 	}
 	if f := repos[0].findings[0]; f.Ecosystem != "npm" || f.Category != provider.CategoryDependency {
 		t.Errorf("finding = %+v, want ecosystem=npm (lowercased) category=dependency", f)
+	}
+}
+
+func TestMapGraphQLPosture(t *testing.T) {
+	protected := `{"data":{"repositoryOwner":{"repositories":{"nodes":[{"name":"a","visibility":"PRIVATE","isArchived":true,"hasVulnerabilityAlertsEnabled":true,"defaultBranchRef":{"branchProtectionRule":{"id":"x"}},"pullRequests":{"totalCount":0}}]}}}}`
+	var gr graphqlResponse
+	if err := json.Unmarshal([]byte(protected), &gr); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	repos := mapGraphQLRepos(&gr)
+	if len(repos) != 1 || repos[0].posture == nil {
+		t.Fatalf("repos = %+v, want one repo with posture", repos)
+	}
+	if p := repos[0].posture; p.Visibility != "private" || !p.Archived || !p.DependabotEnabled || !p.BranchProtected {
+		t.Errorf("posture = %+v, want private/archived/dependabot/branch-protected all set", *p)
+	}
+
+	// No branch-protection rule -> BranchProtected false; visibility lowercased.
+	unprotected := `{"data":{"repositoryOwner":{"repositories":{"nodes":[{"name":"b","visibility":"PUBLIC","defaultBranchRef":{"branchProtectionRule":null},"pullRequests":{"totalCount":0}}]}}}}`
+	var gr2 graphqlResponse
+	if err := json.Unmarshal([]byte(unprotected), &gr2); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p := mapGraphQLRepos(&gr2)[0].posture; p.BranchProtected || p.Visibility != "public" {
+		t.Errorf("posture = %+v, want branch_protected=false visibility=public", *p)
 	}
 }
 
