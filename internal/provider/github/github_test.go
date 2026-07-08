@@ -283,6 +283,97 @@ func TestSnapshotUserTarget(t *testing.T) {
 	}
 }
 
+// repoGraphQL is a repository(owner,name) response for the single-repo query.
+const repoGraphQL = `{"data":{"repository":{
+	"name":"widget","isArchived":false,"visibility":"PRIVATE","hasVulnerabilityAlertsEnabled":true,
+	"defaultBranchRef":{"branchProtectionRule":{"id":"x"}},
+	"pullRequests":{"totalCount":4},
+	"vulnerabilityAlerts":{"nodes":[{"securityVulnerability":{"severity":"HIGH","package":{"ecosystem":"NPM"}}}]}
+},"rateLimit":{"remaining":4321}}}`
+
+func TestSnapshotRepo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(repoGraphQL))
+		case r.URL.Path == "/repos/acme/widget/code-scanning/alerts":
+			w.Header().Set("X-RateLimit-Remaining", "4989")
+			_, _ = w.Write([]byte(`[{"rule":{"security_severity_level":"critical"},"tool":{"name":"CodeQL"}}]`))
+		case r.URL.Path == "/repos/acme/widget/secret-scanning/alerts":
+			w.Header().Set("X-RateLimit-Remaining", "4988")
+			_, _ = w.Write([]byte(`[{}]`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := mustNewProvider(t, srv, Options{}).SnapshotRepo(context.Background(), "acme", "widget")
+	if err != nil {
+		t.Fatalf("SnapshotRepo: %v", err)
+	}
+	want := provider.Snapshot{
+		Repos: []provider.RepoMetrics{{
+			Name:            "widget",
+			OpenReviewItems: 4,
+			Posture:         &provider.RepoPosture{Visibility: "private", DependabotEnabled: true, BranchProtected: true},
+			Findings: []provider.Finding{
+				{Severity: "high", Category: "dependency", Ecosystem: "npm"},
+				{Severity: "unknown", Category: "secret"},
+				{Severity: "critical", Category: "static_analysis", Tool: "CodeQL"},
+			},
+		}},
+		RateLimits: []provider.RateLimit{
+			{Resource: "graphql", Remaining: 4321},
+			{Resource: "rest", Remaining: 4989},
+		},
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("snapshot mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestSnapshotRepoGraphQLFailureIsPartial(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			w.WriteHeader(http.StatusInternalServerError) // graphql down
+		case r.URL.Path == "/repos/acme/widget/code-scanning/alerts":
+			_, _ = w.Write([]byte(`[{"rule":{"security_severity_level":"high"},"tool":{"name":"CodeQL"}}]`))
+		case r.URL.Path == "/repos/acme/widget/secret-scanning/alerts":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := mustNewProvider(t, srv, Options{}).SnapshotRepo(context.Background(), "acme", "widget")
+	if err != nil {
+		t.Fatalf("SnapshotRepo returned a hard error, want partial: %v", err)
+	}
+	if !slices.Contains(got.SourceErrors, provider.SourceError{Source: provider.SourceGraphQL}) {
+		t.Errorf("SourceErrors = %+v, want graphql", got.SourceErrors)
+	}
+	// The repo is still present with the code-scanning finding; posture is absent (graphql failed).
+	if len(got.Repos) != 1 || got.Repos[0].Name != "widget" || got.Repos[0].Posture != nil {
+		t.Fatalf("repos = %+v, want widget with nil posture", got.Repos)
+	}
+}
+
+func TestSnapshotRepoAllSourcesFail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	if _, err := mustNewProvider(t, srv, Options{}).SnapshotRepo(context.Background(), "acme", "widget"); err == nil {
+		t.Fatal("SnapshotRepo: got nil error, want failure when every source fails")
+	}
+}
+
 func TestNewAuthSelection(t *testing.T) {
 	t.Run("token", func(t *testing.T) {
 		if _, err := New(Options{Token: "pat"}); err != nil {

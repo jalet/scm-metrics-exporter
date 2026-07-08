@@ -59,7 +59,10 @@ type Provider struct {
 	maxPages   int
 }
 
-var _ provider.Provider = (*Provider)(nil)
+var (
+	_ provider.Provider        = (*Provider)(nil)
+	_ provider.RepoSnapshotter = (*Provider)(nil)
+)
 
 // New builds a GitHub provider from opts, selecting the authentication method and
 // wiring a retry/backoff transport that honors Retry-After.
@@ -144,6 +147,59 @@ func (p *Provider) Snapshot(ctx context.Context, target string) (provider.Snapsh
 	zlog.Debug().Str("provider", "github").Str("target", target).
 		Int("repos", len(snap.Repos)).Int("rate_limits", len(snap.RateLimits)).
 		Msg("github snapshot assembled")
+	return snap, nil
+}
+
+// SnapshotRepo polls a single repository (the per-repo collection path used by
+// operator-dispatched run-once Jobs). It mirrors Snapshot but scopes every source to one
+// repo: GraphQL for open PRs, Dependabot findings, and posture; REST for code scanning and
+// secret scanning. Each failing source is recorded in SourceErrors and yields a partial
+// snapshot; only when every source fails does it return an error.
+func (p *Provider) SnapshotRepo(ctx context.Context, owner, repo string) (provider.Snapshot, error) {
+	gql, gqlRate, gqlKnown, gqlErr := p.collectRepoGraphQL(ctx, owner, repo)
+	csFindings, csRate, csKnown, _, csErr := p.codeScanningForRepo(ctx, owner, repo)
+	ssFindings, ssRate, ssKnown, _, ssErr := p.secretScanningForRepo(ctx, owner, repo)
+
+	if gqlErr != nil && csErr != nil && ssErr != nil {
+		return provider.Snapshot{}, fmt.Errorf("github: all sources failed for %s/%s: %w", owner, repo, errors.Join(gqlErr, csErr, ssErr))
+	}
+
+	var gqlRepos []graphqlRepo
+	if gqlErr == nil {
+		gqlRepos = []graphqlRepo{gql}
+	}
+	snap := provider.Snapshot{Repos: mergeRepos(gqlRepos,
+		map[string][]provider.Finding{repo: csFindings},
+		map[string][]provider.Finding{repo: ssFindings},
+	)}
+	if gqlKnown {
+		snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceGraphQL, Remaining: gqlRate})
+	}
+	// Code scanning and secret scanning share the REST rate-limit budget; report it once.
+	restRate, restKnown := csRate, csKnown
+	if !restKnown && ssKnown {
+		restRate, restKnown = ssRate, true
+	}
+	if restKnown {
+		snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceREST, Remaining: restRate})
+	}
+	if gqlErr != nil {
+		zlog.Warn().Err(gqlErr).Str("provider", "github").Str("source", provider.SourceGraphQL).Str("repo", owner+"/"+repo).
+			Msg("source failed; snapshot is partial")
+		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceGraphQL})
+	}
+	if csErr != nil {
+		zlog.Warn().Err(csErr).Str("provider", "github").Str("source", provider.SourceREST).Str("repo", owner+"/"+repo).
+			Msg("source failed; snapshot is partial")
+		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceREST})
+	}
+	if ssErr != nil {
+		zlog.Warn().Err(ssErr).Str("provider", "github").Str("source", provider.SourceSecretScanning).Str("repo", owner+"/"+repo).
+			Msg("source failed; snapshot is partial")
+		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceSecretScanning})
+	}
+	zlog.Debug().Str("provider", "github").Str("repo", owner+"/"+repo).
+		Int("repos", len(snap.Repos)).Int("rate_limits", len(snap.RateLimits)).Msg("github repo snapshot assembled")
 	return snap, nil
 }
 

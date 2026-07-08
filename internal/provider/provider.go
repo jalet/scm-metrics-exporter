@@ -35,6 +35,21 @@ type Provider interface {
 	Snapshot(ctx context.Context, target string) (Snapshot, error)
 }
 
+// RepoSnapshotter is an optional capability for providers that can collect a single
+// repository in isolation. It powers the per-repo collection path (operator-dispatched
+// run-once Jobs), where each Job scopes its credentials and API calls to one repository.
+//
+// It is deliberately separate from Provider so a provider can add the capability without
+// forcing every provider to implement it: callers type-assert for it and fall back to
+// Snapshot when it is absent.
+type RepoSnapshotter interface {
+	// SnapshotRepo polls a single repository identified by owner and repo name, returning
+	// a Snapshot containing just that repository. Error semantics match Provider.Snapshot:
+	// a returned error means nothing usable was collected, while partial degradation is
+	// reported in Snapshot.SourceErrors with a nil error.
+	SnapshotRepo(ctx context.Context, owner, repo string) (Snapshot, error)
+}
+
 // Snapshot is the immutable result of one poll of a Provider.
 type Snapshot struct {
 	// Repos holds per-repository metrics.
