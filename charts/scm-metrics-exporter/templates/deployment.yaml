@@ -49,6 +49,8 @@ spec:
               containerPort: {{ .Values.metrics.service.port }}
             - name: health
               containerPort: 8081
+            - name: webhook
+              containerPort: 9443
           livenessProbe:
             httpGet:
               path: /healthz
@@ -65,6 +67,18 @@ spec:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: webhook-cert
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
+      volumes:
+        # cert-manager issues this Secret. Non-optional on purpose: the pod waits for the
+        # cert before starting, so the operator's startup cert check always sees it and
+        # the always-on webhook serves. cert-manager is therefore a required prerequisite.
+        - name: webhook-cert
+          secret:
+            secretName: {{ include "scm-metrics-exporter.fullname" . }}-webhook-cert
+            defaultMode: 420
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

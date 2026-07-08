@@ -1,0 +1,46 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-scm-jalet-io-v1alpha1-githubmetricsexporter
+  failurePolicy: Fail
+  name: vgithubmetricsexporter.scm.jalet.io
+  rules:
+  - apiGroups:
+    - scm.jalet.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - githubmetricsexporters
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-scm-jalet-io-v1alpha1-gitlabmetricsexporter
+  failurePolicy: Fail
+  name: vgitlabmetricsexporter.scm.jalet.io
+  rules:
+  - apiGroups:
+    - scm.jalet.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - gitlabmetricsexporters
+  sideEffects: None
