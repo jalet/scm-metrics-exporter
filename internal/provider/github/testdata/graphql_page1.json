@@ -1,6 +1,6 @@
 {
   "data": {
-    "organization": {
+    "repositoryOwner": {
       "repositories": {
         "pageInfo": { "hasNextPage": true, "endCursor": "CURSOR2" },
         "nodes": [

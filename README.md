@@ -162,7 +162,8 @@ The exporter is configured entirely by environment variables.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `GITHUB_ORG` | (required) | Organization to poll. |
+| `GITHUB_TARGET_TYPE` | `org` | Poll an `org` or a `user`. |
+| `GITHUB_ORG` / `GITHUB_USER` | (one required) | Login of the org or user, per target type. |
 | `GITHUB_TOKEN` | | PAT auth. |
 | `GITHUB_APP_ID` / `GITHUB_APP_INSTALLATION_ID` / `GITHUB_APP_PRIVATE_KEY_PATH` | | GitHub App auth. |
 | `GITHUB_CODE_SCANNING_TOOL` | (all tools) | Optional SARIF tool filter (for example `CodeQL`). |
@@ -177,6 +178,14 @@ The exporter is configured entirely by environment variables.
 **Auth precedence:** if the full App trio is set it is used; otherwise `GITHUB_TOKEN`;
 otherwise startup fails. Provide credentials by env var or file path only -- never
 commit tokens or private keys.
+
+**Target types:** GitHub polls an organization (`GITHUB_TARGET_TYPE=org`, the default) or
+a user (`GITHUB_TARGET_TYPE=user` with `GITHUB_USER`). For a user, code-scanning findings
+are gathered per-repository (one extra REST call per repo, tolerating repos without code
+scanning enabled). GitLab mirrors this with `GITLAB_TARGET_TYPE=group|user`
+(`GITLAB_GROUP` / `GITLAB_USER`); a GitLab **user** target yields merge-request counts
+only -- security findings are unavailable because GitLab vulnerabilities are
+Ultimate/group-scoped.
 
 ## Develop
 

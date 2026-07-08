@@ -181,6 +181,54 @@ func TestSnapshotCodeScanningToolFilter(t *testing.T) {
 	}
 }
 
+func TestSnapshotUserTarget(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			serveFixture(t, w, "graphql_single.json") // repositoryOwner -> repo "solo" (dependency finding)
+		case r.Method == http.MethodGet && r.URL.Path == "/users/octocat/repos":
+			w.Header().Set("X-RateLimit-Remaining", "4990")
+			_, _ = w.Write([]byte(`[{"name":"solo"},{"name":"locked"}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/octocat/solo/code-scanning/alerts":
+			w.Header().Set("X-RateLimit-Remaining", "4989")
+			_, _ = w.Write([]byte(`[{"rule":{"security_severity_level":"high"}}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/octocat/locked/code-scanning/alerts":
+			w.WriteHeader(http.StatusForbidden) // code scanning not enabled -> skipped, not a failure
+			_, _ = w.Write([]byte(`{"message":"no code scanning on this repo"}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	p := mustNewProvider(t, srv, Options{TargetType: "user"})
+	got, err := p.Snapshot(context.Background(), "octocat")
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if len(got.SourceErrors) != 0 {
+		t.Fatalf("SourceErrors = %+v, want none (the 403 repo is skipped, not a source failure)", got.SourceErrors)
+	}
+
+	var solo *provider.RepoMetrics
+	for i := range got.Repos {
+		if got.Repos[i].Name == "solo" {
+			solo = &got.Repos[i]
+		}
+	}
+	if solo == nil {
+		t.Fatalf("repos = %+v, want a repo named solo", got.Repos)
+	}
+	cats := map[string]int{}
+	for _, f := range solo.Findings {
+		cats[f.Category]++
+	}
+	if cats[provider.CategoryDependency] == 0 || cats[provider.CategoryStaticAnalysis] == 0 {
+		t.Errorf("solo findings = %+v, want both dependency (graphql) and static_analysis (per-repo code scanning)", solo.Findings)
+	}
+}
+
 func TestNewAuthSelection(t *testing.T) {
 	t.Run("token", func(t *testing.T) {
 		if _, err := New(Options{Token: "pat"}); err != nil {
@@ -214,10 +262,10 @@ func writeTestKey(t *testing.T) string {
 }
 
 func FuzzMapGraphQL(f *testing.F) {
-	f.Add([]byte(`{"data":{"organization":{"repositories":{"nodes":[{"name":"a","pullRequests":{"totalCount":1},"vulnerabilityAlerts":{"nodes":[{"securityVulnerability":{"severity":"MODERATE"}}]}}]}},"rateLimit":{"remaining":10}}}`))
+	f.Add([]byte(`{"data":{"repositoryOwner":{"repositories":{"nodes":[{"name":"a","pullRequests":{"totalCount":1},"vulnerabilityAlerts":{"nodes":[{"securityVulnerability":{"severity":"MODERATE"}}]}}]}},"rateLimit":{"remaining":10}}}`))
 	f.Add([]byte(`{}`))
 	f.Add([]byte(``))
-	f.Add([]byte(`{"data":{"organization":{"repositories":{"nodes":null}}}}`))
+	f.Add([]byte(`{"data":{"repositoryOwner":{"repositories":{"nodes":null}}}}`))
 	f.Fuzz(func(_ *testing.T, data []byte) {
 		var gr graphqlResponse
 		if err := json.Unmarshal(data, &gr); err != nil {

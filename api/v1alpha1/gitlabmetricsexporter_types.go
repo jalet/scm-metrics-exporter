@@ -6,12 +6,27 @@ import (
 )
 
 // GitLabMetricsExporterSpec configures a GitLab metrics exporter.
+//
+// +kubebuilder:validation:XValidation:rule="self.targetType != 'group' || (has(self.group) && size(self.group) > 0)",message="targetType 'group' requires group"
+// +kubebuilder:validation:XValidation:rule="self.targetType != 'user' || (has(self.user) && size(self.user) > 0)",message="targetType 'user' requires user"
 type GitLabMetricsExporterSpec struct {
 	ExporterSpec `json:",inline"`
 
-	// Group is the GitLab group to poll.
-	// +kubebuilder:validation:MinLength=1
-	Group string `json:"group"`
+	// TargetType selects whether Group or User is polled. User targets yield merge
+	// request counts only; security findings are unavailable (GitLab vulnerabilities
+	// are Ultimate/group-scoped).
+	// +kubebuilder:validation:Enum=group;user
+	// +kubebuilder:default=group
+	// +optional
+	TargetType string `json:"targetType,omitempty"`
+
+	// Group is the GitLab group to poll (targetType "group").
+	// +optional
+	Group string `json:"group,omitempty"`
+
+	// User is the GitLab user namespace to poll (targetType "user").
+	// +optional
+	User string `json:"user,omitempty"`
 
 	// TokenKey is the CredentialsSecret key holding the GitLab access token.
 	// +kubebuilder:validation:MinLength=1
@@ -26,7 +41,9 @@ type GitLabMetricsExporterSpec struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=glme
+// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.targetType`
 // +kubebuilder:printcolumn:name="Group",type=string,JSONPath=`.spec.group`
+// +kubebuilder:printcolumn:name="User",type=string,JSONPath=`.spec.user`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

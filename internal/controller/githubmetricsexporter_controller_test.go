@@ -102,6 +102,63 @@ func getEnv(env []corev1.EnvVar, name string) (corev1.EnvVar, bool) {
 	return corev1.EnvVar{}, false
 }
 
+func TestGitHubTargetTypeCELValidation(t *testing.T) {
+	ctx := context.Background()
+	ns := createNamespace(t)
+
+	bad := &scmv1alpha1.GitHubMetricsExporter{
+		ObjectMeta: metav1.ObjectMeta{Name: "gh-baduser", Namespace: ns},
+		Spec: scmv1alpha1.GitHubMetricsExporterSpec{
+			ExporterSpec: scmv1alpha1.ExporterSpec{CredentialsSecret: corev1.LocalObjectReference{Name: "c"}},
+			TargetType:   "user", AuthMode: "token", TokenKey: "token", // targetType=user but no user
+		},
+	}
+	if err := k8sClient.Create(ctx, bad); err == nil {
+		t.Fatal("create user CR without user: got nil error, want CEL rejection")
+	}
+
+	good := &scmv1alpha1.GitHubMetricsExporter{
+		ObjectMeta: metav1.ObjectMeta{Name: "gh-gooduser", Namespace: ns},
+		Spec: scmv1alpha1.GitHubMetricsExporterSpec{
+			ExporterSpec: scmv1alpha1.ExporterSpec{CredentialsSecret: corev1.LocalObjectReference{Name: "c"}},
+			TargetType:   "user", User: "octocat", AuthMode: "token", TokenKey: "token",
+		},
+	}
+	if err := k8sClient.Create(ctx, good); err != nil {
+		t.Fatalf("create valid user CR: %v", err)
+	}
+}
+
+func TestReconcileUserTargetEnv(t *testing.T) {
+	ctx := context.Background()
+	ns := createNamespace(t)
+	createSecret(t, ns, "gh-creds", map[string][]byte{"token": []byte("ghp_x")})
+
+	cr := &scmv1alpha1.GitHubMetricsExporter{
+		ObjectMeta: metav1.ObjectMeta{Name: "ghu", Namespace: ns},
+		Spec: scmv1alpha1.GitHubMetricsExporterSpec{
+			ExporterSpec: scmv1alpha1.ExporterSpec{CredentialsSecret: corev1.LocalObjectReference{Name: "gh-creds"}},
+			TargetType:   "user", User: "octocat", AuthMode: "token", TokenKey: "token",
+		},
+	}
+	if err := k8sClient.Create(ctx, cr); err != nil {
+		t.Fatalf("create cr: %v", err)
+	}
+	reconcile(t, "ghu", ns)
+
+	var dep appsv1.Deployment
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: "ghu", Namespace: ns}, &dep); err != nil {
+		t.Fatalf("get deployment: %v", err)
+	}
+	env := dep.Spec.Template.Spec.Containers[0].Env
+	if e, ok := getEnv(env, "GITHUB_TARGET_TYPE"); !ok || e.Value != "user" {
+		t.Errorf("GITHUB_TARGET_TYPE = %q (found=%v), want user", e.Value, ok)
+	}
+	if e, ok := getEnv(env, "GITHUB_USER"); !ok || e.Value != "octocat" {
+		t.Errorf("GITHUB_USER = %q (found=%v), want octocat", e.Value, ok)
+	}
+}
+
 func TestReconcileTokenModeCreatesChildren(t *testing.T) {
 	ctx := context.Background()
 	ns := createNamespace(t)

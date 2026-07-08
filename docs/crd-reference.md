@@ -24,7 +24,9 @@ Short name `ghme`. Spec = `ExporterSpec` plus:
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `org` | string | (required) | GitHub organization to poll. |
+| `targetType` | enum `org`\|`user` | `org` | Poll an organization or a user account. |
+| `org` | string | (required for `org`) | GitHub organization to poll. |
+| `user` | string | (required for `user`) | GitHub user to poll; code scanning is gathered per-repository. |
 | `authMode` | enum `token`\|`app` | `token` | Credential type in `credentialsSecret`. |
 | `tokenKey` | string | | Secret key holding a PAT (required when `authMode: token`). |
 | `appID` | integer | | GitHub App ID (required when `authMode: app`). |
@@ -34,10 +36,11 @@ Short name `ghme`. Spec = `ExporterSpec` plus:
 
 **Validation (CEL, enforced by the API server):**
 
+- `targetType: org` requires a non-empty `org`; `targetType: user` requires a non-empty `user`.
 - `authMode: app` requires `appID > 0`, `appInstallationID > 0`, and a non-empty `appPrivateKeyKey`.
 - `authMode: token` requires a non-empty `tokenKey`.
 
-**Printer columns:** `Org`, `Auth`, `Ready`, `Age`.
+**Printer columns:** `Type`, `Org`, `User`, `Auth`, `Ready`, `Age`.
 
 ## `GitLabMetricsExporter`
 
@@ -45,15 +48,21 @@ Short name `glme`. Spec = `ExporterSpec` plus:
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `group` | string | (required) | GitLab group to poll. |
+| `targetType` | enum `group`\|`user` | `group` | Poll a group or a user namespace. |
+| `group` | string | (required for `group`) | GitLab group to poll. |
+| `user` | string | (required for `user`) | GitLab user namespace to poll (merge-request counts only). |
 | `tokenKey` | string | (required) | Secret key holding the GitLab access token. |
 | `baseURL` | string | (gitlab.com) | API base URL for a self-hosted instance. |
 
-**Printer columns:** `Group`, `Ready`, `Age`.
+**Validation (CEL):** `targetType: group` requires a non-empty `group`; `targetType: user` requires a non-empty `user`.
 
-Note: vulnerability findings require the GitLab Ultimate tier; open merge-request
-counts work on all tiers. When findings are unavailable the exporter records a
-scrape error and still reports merge-request counts.
+**Printer columns:** `Type`, `Group`, `User`, `Ready`, `Age`.
+
+Note: vulnerability findings require the GitLab Ultimate tier and are group-scoped; open
+merge-request counts work on all tiers. For a **group** target, when findings are
+unavailable the exporter records a scrape error and still reports MR counts. A **user**
+target has no vulnerabilities API, so the exporter reports MR counts only and skips
+findings entirely (no scrape error).
 
 ## Status (`ExporterStatus`)
 

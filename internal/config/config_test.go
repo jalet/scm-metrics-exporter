@@ -6,9 +6,10 @@ import (
 )
 
 var envKeys = []string{
-	"GITHUB_ORG", "GITHUB_TOKEN", "GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID",
-	"GITHUB_APP_PRIVATE_KEY_PATH", "GITHUB_CODE_SCANNING_TOOL", "POLL_INTERVAL",
-	"GITLAB_GROUP", "GITLAB_TOKEN", "GITLAB_URL",
+	"GITHUB_TARGET_TYPE", "GITHUB_ORG", "GITHUB_USER", "GITHUB_TOKEN", "GITHUB_APP_ID",
+	"GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY_PATH", "GITHUB_CODE_SCANNING_TOOL",
+	"POLL_INTERVAL",
+	"GITLAB_TARGET_TYPE", "GITLAB_GROUP", "GITLAB_USER", "GITLAB_TOKEN", "GITLAB_URL",
 }
 
 func setEnv(t *testing.T, kv map[string]string) {
@@ -62,6 +63,20 @@ func TestLoad(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "github user target", provider: "github",
+			env: map[string]string{"GITHUB_TARGET_TYPE": "user", "GITHUB_USER": "octocat", "GITHUB_TOKEN": "ghp_x"},
+			check: func(t *testing.T, c Config) {
+				if c.Target() != "octocat" {
+					t.Errorf("Target() = %q, want octocat", c.Target())
+				}
+				if c.GitHub.TargetType != TargetUser {
+					t.Errorf("TargetType = %q, want user", c.GitHub.TargetType)
+				}
+			},
+		},
+		{name: "github user missing user", provider: "github", env: map[string]string{"GITHUB_TARGET_TYPE": "user", "GITHUB_TOKEN": "ghp_x"}, wantErr: true},
+		{name: "github invalid target type", provider: "github", env: map[string]string{"GITHUB_TARGET_TYPE": "team", "GITHUB_ORG": "acme", "GITHUB_TOKEN": "ghp_x"}, wantErr: true},
 		{name: "github missing org", provider: "github", env: map[string]string{"GITHUB_TOKEN": "ghp_x"}, wantErr: true},
 		{name: "github no credentials", provider: "github", env: map[string]string{"GITHUB_ORG": "acme"}, wantErr: true},
 		{name: "github partial app", provider: "github", env: map[string]string{"GITHUB_ORG": "acme", "GITHUB_APP_ID": "12"}, wantErr: true},
@@ -80,6 +95,17 @@ func TestLoad(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "gitlab user target", provider: "gitlab",
+			env: map[string]string{"GITLAB_TARGET_TYPE": "user", "GITLAB_USER": "alice", "GITLAB_TOKEN": "glpat"},
+			check: func(t *testing.T, c Config) {
+				if c.Target() != "alice" {
+					t.Errorf("Target() = %q, want alice", c.Target())
+				}
+			},
+		},
+		{name: "gitlab user missing user", provider: "gitlab", env: map[string]string{"GITLAB_TARGET_TYPE": "user", "GITLAB_TOKEN": "glpat"}, wantErr: true},
+		{name: "gitlab invalid target type", provider: "gitlab", env: map[string]string{"GITLAB_TARGET_TYPE": "namespace", "GITLAB_GROUP": "acme", "GITLAB_TOKEN": "glpat"}, wantErr: true},
 		{name: "gitlab missing group", provider: "gitlab", env: map[string]string{"GITLAB_TOKEN": "glpat"}, wantErr: true},
 		{name: "gitlab missing token", provider: "gitlab", env: map[string]string{"GITLAB_GROUP": "acme"}, wantErr: true},
 		{name: "unknown provider", provider: "bitbucket", env: map[string]string{}, wantErr: true},
