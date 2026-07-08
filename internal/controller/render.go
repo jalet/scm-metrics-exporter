@@ -192,9 +192,34 @@ func githubCredentialVolume(cr *scmv1alpha1.GitHubMetricsExporter) ([]corev1.Vol
 	return []corev1.Volume{volume}, []corev1.VolumeMount{mount}
 }
 
-// GitLab collection Jobs are deferred: the GitLab provider has no single-repo path yet, so
-// the operator does not dispatch GitLab Jobs (see the GitLab reconciler). The GitLab Job
-// renderer will be added alongside that provider support.
+// ----- GitLab -----
+
+func gitlabJob(cr *scmv1alpha1.GitLabMetricsExporter, image, repo string) *batchv1.Job {
+	return collectionJob(renderInput{
+		crName:    cr.Name,
+		namespace: cr.Namespace,
+		repo:      repo,
+		image:     image,
+		provider:  "gitlab",
+		resources: cr.Spec.Resources,
+		env:       gitlabEnv(cr),
+	})
+}
+
+func gitlabEnv(cr *scmv1alpha1.GitLabMetricsExporter) []corev1.EnvVar {
+	env := append([]corev1.EnvVar{
+		{Name: "GITLAB_TARGET_TYPE", Value: cr.Spec.TargetType},
+		{Name: "GITLAB_GROUP", Value: cr.Spec.Group},
+		{Name: "GITLAB_USER", Value: cr.Spec.User},
+	}, commonExporterEnv(cr.Spec.ExporterSpec)...)
+	if cr.Spec.BaseURL != "" {
+		env = append(env, corev1.EnvVar{Name: "GITLAB_URL", Value: cr.Spec.BaseURL})
+	}
+	return append(env, corev1.EnvVar{
+		Name:      "GITLAB_TOKEN",
+		ValueFrom: secretKeyRef(cr.Spec.CredentialsSecret, cr.Spec.TokenKey),
+	})
+}
 
 func restrictedContainerSecurityContext() *corev1.SecurityContext {
 	return &corev1.SecurityContext{

@@ -24,7 +24,6 @@ const (
 	reasonCredentialInvalid = "CredentialsInvalid"
 	reasonDiscoveryFailed   = "DiscoveryFailed"
 	reasonDispatchFailed    = "DispatchFailed"
-	reasonUnsupported       = "Unsupported"
 
 	// credentialRequeue backs off after a credentials/discovery failure; pendingRequeue
 	// tops up the collection-Job pool as running Jobs finish (parallelism cap reached).

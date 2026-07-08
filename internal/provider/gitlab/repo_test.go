@@ -1,0 +1,109 @@
+package gitlab
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/google/go-cmp/cmp"
+
+	"github.com/jalet/scm-metrics-exporter/internal/provider"
+)
+
+const (
+	projectVulnsJSON = `{"data":{"project":{"vulnerabilities":{"pageInfo":{"hasNextPage":false},"nodes":[
+		{"severity":"HIGH","reportType":"DEPENDENCY_SCANNING","scanner":{"name":"gemnasium"}},
+		{"severity":"CRITICAL","reportType":"SAST","scanner":{"name":"semgrep"}}
+	]}}}}`
+	projectPostureJSON = `{"data":{"project":{"visibility":"private","archived":false,
+		"securityScanners":{"enabled":["SAST","DEPENDENCY_SCANNING"]},
+		"branchRules":{"nodes":[{"isDefault":true,"isProtected":true}]}}}}`
+)
+
+func TestSnapshotRepo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == graphqlPath:
+			w.Header().Set("RateLimit-Remaining", "1990")
+			w.Header().Set("Content-Type", "application/json")
+			query, _ := readGraphQL(t, r)
+			if strings.Contains(query, "ProjectPosture") {
+				_, _ = w.Write([]byte(projectPostureJSON))
+				return
+			}
+			_, _ = w.Write([]byte(projectVulnsJSON))
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/merge_requests"):
+			w.Header().Set("RateLimit-Remaining", "59")
+			_, _ = w.Write([]byte(`[{},{},{}]`)) // 3 open MRs
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := mustNewProvider(t, srv, Options{}).SnapshotRepo(context.Background(), "acme", "acme/svc")
+	if err != nil {
+		t.Fatalf("SnapshotRepo: %v", err)
+	}
+	want := provider.Snapshot{
+		Repos: []provider.RepoMetrics{{
+			Name:            "acme/svc",
+			OpenReviewItems: 3,
+			Posture:         &provider.RepoPosture{Visibility: "private", DependabotEnabled: true, BranchProtected: true},
+			Findings: []provider.Finding{
+				{Severity: "high", Category: "dependency", Tool: "gemnasium"},
+				{Severity: "critical", Category: "static_analysis", Tool: "semgrep"},
+			},
+		}},
+		RateLimits: []provider.RateLimit{
+			{Resource: "rest", Remaining: 59},
+			{Resource: "graphql", Remaining: 1990},
+		},
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("snapshot mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestSnapshotRepoVulnsUnavailableIsPartial(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == graphqlPath:
+			w.Header().Set("Content-Type", "application/json")
+			query, _ := readGraphQL(t, r)
+			if strings.Contains(query, "ProjectPosture") {
+				_, _ = w.Write([]byte(projectPostureJSON))
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":{"project":{"vulnerabilities":null}}}`)) // non-Ultimate
+		case strings.Contains(r.URL.Path, "/merge_requests"):
+			_, _ = w.Write([]byte(`[{}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := mustNewProvider(t, srv, Options{}).SnapshotRepo(context.Background(), "acme", "acme/svc")
+	if err != nil {
+		t.Fatalf("SnapshotRepo returned a hard error, want partial: %v", err)
+	}
+	if len(got.Repos) != 1 || got.Repos[0].OpenReviewItems != 1 || got.Repos[0].Posture == nil {
+		t.Fatalf("repos = %+v, want the project with MRs + posture", got.Repos)
+	}
+	if len(got.Repos[0].Findings) != 0 {
+		t.Errorf("findings = %+v, want none (vulnerabilities unavailable)", got.Repos[0].Findings)
+	}
+	found := false
+	for _, se := range got.SourceErrors {
+		if se.Source == provider.SourceGraphQL {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("SourceErrors = %+v, want graphql", got.SourceErrors)
+	}
+}

@@ -61,8 +61,9 @@ https://deepwiki.com/mogenius/renovate-operator/4.3-project-discovery)
    are transient per discovery cycle; freshness is interval-bound.
 6. **Autodiscover supports include and exclude filters** by design. `include` ships
    first; `exclude` may land in a later phase but the schema reserves it now.
-7. **GitHub first. GitLab discovery/dispatch is deferred** to a later milestone; the
-   shared spec fields are provider-neutral where possible.
+7. **Both providers implemented.** GitHub landed first; GitLab followed (group/user project
+   discovery + single-project `SnapshotRepo`). GitLab has no per-project token scoping, so
+   its Jobs use the configured group/personal token.
 
 ## 3. Architecture
 
@@ -210,10 +211,11 @@ Rough epic decomposition (sequenced in the implementation plan):
 Deferred to later phases:
 
 - `autodiscover.exclude` implementation.
-- GitLab discovery/dispatch (group discovery -> per-project Jobs, group/project
-  tokens).
 - E21 workflow-run metrics ride on top as one more signal the per-repo collector
   gathers (no longer a standalone architecture problem).
+
+Done after the initial GitHub-only build: GitLab discovery/dispatch (group/user project
+discovery -> per-project Jobs; single-project `SnapshotRepo`; group/personal token).
 
 ## 12. Open questions
 

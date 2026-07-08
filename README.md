@@ -156,10 +156,28 @@ With App auth, each collection Job mints a repository-scoped installation token 
 privilege). Install one App per organization to give each `GitHubMetricsExporter` its own
 rate budget.
 
-**GitLab** collection through the operator is **deferred** in the discovery/dispatch model
-(the GitLab provider has no single-repo collection path yet). A `GitLabMetricsExporter`
-reconciles to `Ready=False` / `Unsupported` and dispatches nothing. The GitLab provider
-still works when the exporter binary is run directly against a group (see below).
+**GitLab:** create a Secret with a group or personal access token under `token`, then:
+
+```yaml
+apiVersion: scm.jalet.io/v1alpha1
+kind: GitLabMetricsExporter
+metadata:
+  name: acme
+  namespace: scm-system
+spec:
+  group: acme
+  tokenKey: token
+  credentialsSecret:
+    name: acme-gitlab
+  baseURL: https://gitlab.com      # or your self-hosted instance
+  export:
+    otlpEndpoint: http://otel-collector.observability:4318
+```
+
+The operator discovers the group's projects (including subgroups) and dispatches one
+collection Job per project, keyed by `path_with_namespace`. Vulnerability findings require
+GitLab Ultimate; open merge-request counts and posture work on all tiers. GitLab has no
+per-project token scoping, so Jobs use the configured group/personal token.
 
 Inspect status:
 
@@ -244,9 +262,7 @@ After changing API types or RBAC markers, run `mise run generate manifests` and
   `export.otlpEndpoint` is reachable from the Job pods and the OTLP collector is ingesting;
   check the Job logs (`kubectl logs job/<name>`).
 - **CR `Ready=False` / `DiscoveryFailed`** -- the operator could not list repositories:
-  check the credentials and that the token/App can see the target's repos.
-- **GitLab CR `Ready=False` / `Unsupported`** -- expected: GitLab operator collection is
-  deferred (run the exporter binary directly for GitLab).
+  check the credentials and that the token/App can see the target's repos/projects.
 
 ## Documentation
 
