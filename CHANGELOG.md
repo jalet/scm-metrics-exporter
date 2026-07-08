@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.2.0...v0.3.0) (2026-07-08)
+
+
+### Features
+
+* **exporter:** add poll-lifecycle and per-source logging ([#9](https://github.com/jalet/scm-metrics-exporter/issues/9)) ([3f4df7c](https://github.com/jalet/scm-metrics-exporter/commit/3f4df7cbb2c34fdcc2d8473a888bd5134643d859))
+* **metrics:** set service.name and service.version on the resource ([#8](https://github.com/jalet/scm-metrics-exporter/issues/8)) ([70859a6](https://github.com/jalet/scm-metrics-exporter/commit/70859a6b8c3f71bf7543941d687190b85cd77e74))
+* **metrics:** stamp otel_scope_version with the build version ([#6](https://github.com/jalet/scm-metrics-exporter/issues/6)) ([f0b4c14](https://github.com/jalet/scm-metrics-exporter/commit/f0b4c1410f7718acb94240ee84f72d04e4774f2f))
+
 ## [0.2.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.1.0...v0.2.0) (2026-07-07)
 
 
