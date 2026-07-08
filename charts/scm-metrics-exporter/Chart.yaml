@@ -4,7 +4,7 @@ description: >-
   Kubernetes operator that reconciles GitHubMetricsExporter and
   GitLabMetricsExporter custom resources into SCM metrics exporter Deployments.
 type: application
-version: 0.2.0
+version: 0.3.0
 appVersion: 0.1.0
 kubeVersion: '>=1.29.0-0'
 home: https://github.com/jalet/scm-metrics-exporter
