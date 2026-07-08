@@ -46,6 +46,11 @@ func (in *ExporterSpec) DeepCopyInto(out *ExporterSpec) {
 	out.PollInterval = in.PollInterval
 	in.Resources.DeepCopyInto(&out.Resources)
 	out.Export = in.Export
+	if in.FindingDimensions != nil {
+		in, out := &in.FindingDimensions, &out.FindingDimensions
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	out.CredentialsSecret = in.CredentialsSecret
 }
 

@@ -64,6 +64,14 @@ type Finding struct {
 	Severity string
 	// Category is one of the Category* constants.
 	Category string
+	// Ecosystem is the dependency package ecosystem (npm, pip, ...) for dependency
+	// findings; empty otherwise. Emitted as the optional "ecosystem" metric label only
+	// when that dimension is enabled.
+	Ecosystem string
+	// Tool is the scanning tool that produced the finding (code-scanning tool name,
+	// GitLab scanner); empty when unknown. Emitted as the optional "tool" metric label
+	// only when that dimension is enabled.
+	Tool string
 }
 
 // RateLimit is the remaining API quota for one resource of a provider.

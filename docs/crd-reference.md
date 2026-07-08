@@ -16,6 +16,7 @@ These fields are present on both `GitHubMetricsExporter` and `GitLabMetricsExpor
 | `export.exporter` | enum `prometheus`\|`otlp` | `prometheus` | OTel metrics backend. |
 | `export.otlpEndpoint` | string | none | OTLP endpoint, used when `exporter: otlp`. |
 | `serviceMonitor` | boolean | `false` | Operator creates a ServiceMonitor for the exporter (requires the prometheus-operator CRD). |
+| `findingDimensions` | `[]string` (enum `ecosystem`\|`tool`) | none | Optional extra labels on `scm_security_findings_open`. Off by default (raises cardinality). |
 | `credentialsSecret.name` | string | (required) | Secret in the CR namespace holding the credentials. |
 
 ## `GitHubMetricsExporter`

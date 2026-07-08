@@ -37,6 +37,13 @@ type ExporterSpec struct {
 	// +optional
 	ServiceMonitor bool `json:"serviceMonitor,omitempty"`
 
+	// FindingDimensions adds optional labels to the security-findings metric: "ecosystem"
+	// (Dependabot package ecosystem) and "tool" (scanning tool). Off by default because
+	// they multiply series cardinality.
+	// +kubebuilder:validation:items:Enum=ecosystem;tool
+	// +optional
+	FindingDimensions []string `json:"findingDimensions,omitempty"`
+
 	// CredentialsSecret names the Secret in the CR's namespace holding the provider
 	// credentials referenced by the provider-specific key fields.
 	CredentialsSecret corev1.LocalObjectReference `json:"credentialsSecret"`

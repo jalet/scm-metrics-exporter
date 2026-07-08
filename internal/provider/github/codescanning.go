@@ -148,6 +148,7 @@ func codeScanningFinding(a *gh.Alert) provider.Finding {
 	return provider.Finding{
 		Severity: provider.NormalizeSeverity(codeScanningSeverity(a)),
 		Category: provider.CategoryStaticAnalysis,
+		Tool:     a.GetTool().GetName(),
 	}
 }
 

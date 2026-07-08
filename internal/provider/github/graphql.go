@@ -26,7 +26,7 @@ const ownerMetricsQuery = `query OwnerMetrics($login: String!, $cursor: String) 
         name
         pullRequests(states: OPEN) { totalCount }
         vulnerabilityAlerts(states: OPEN, first: 100) {
-          nodes { securityVulnerability { severity } }
+          nodes { securityVulnerability { severity package { ecosystem } } }
         }
       }
     }
@@ -57,6 +57,9 @@ type graphqlResponse struct {
 						Nodes []struct {
 							SecurityVulnerability struct {
 								Severity string `json:"severity"`
+								Package  struct {
+									Ecosystem string `json:"ecosystem"`
+								} `json:"package"`
 							} `json:"securityVulnerability"`
 						} `json:"nodes"`
 					} `json:"vulnerabilityAlerts"`
@@ -169,8 +172,9 @@ func mapGraphQLRepos(gr *graphqlResponse) []graphqlRepo {
 		repo := graphqlRepo{name: n.Name, openPRs: n.PullRequests.TotalCount}
 		for _, a := range n.VulnerabilityAlerts.Nodes {
 			repo.findings = append(repo.findings, provider.Finding{
-				Severity: provider.NormalizeSeverity(a.SecurityVulnerability.Severity),
-				Category: provider.CategoryDependency,
+				Severity:  provider.NormalizeSeverity(a.SecurityVulnerability.Severity),
+				Category:  provider.CategoryDependency,
+				Ecosystem: strings.ToLower(a.SecurityVulnerability.Package.Ecosystem),
 			})
 		}
 		repos = append(repos, repo)

@@ -34,7 +34,9 @@ per-provider custom resources into exporter Deployments.
 `severity` is one of `critical`, `high`, `medium`, `low`, or `unknown` (GitHub
 secret-scanning alerts carry no severity). `category` is one of `dependency`,
 `static_analysis`, `secret`, `container`. `source` is `graphql`, `rest`, or
-`secret_scanning`; `resource` is `graphql` or `rest`.
+`secret_scanning`; `resource` is `graphql` or `rest`. Optional `ecosystem` (Dependabot
+package ecosystem) and `tool` (scanning tool) labels are added to
+`scm_security_findings_open` only when enabled via `SCM_FINDING_DIMENSIONS`.
 
 ## Components
 
@@ -168,6 +170,7 @@ The exporter is configured entirely by environment variables.
 | `GITHUB_TOKEN` | | PAT auth. |
 | `GITHUB_APP_ID` / `GITHUB_APP_INSTALLATION_ID` / `GITHUB_APP_PRIVATE_KEY_PATH` | | GitHub App auth. |
 | `GITHUB_CODE_SCANNING_TOOL` | (all tools) | Optional SARIF tool filter (for example `CodeQL`). |
+| `SCM_FINDING_DIMENSIONS` | (none) | Comma list of optional finding labels: `ecosystem`, `tool`. Off by default (raises cardinality). |
 | `POLL_INTERVAL` | `5m` | Poll cadence (Go duration, must be positive). |
 | `OTEL_METRICS_EXPORTER` | `otlp` | `prometheus`, `otlp`, or `console`. |
 | `OTEL_EXPORTER_PROMETHEUS_HOST` | `localhost` | Set to `0.0.0.0` in a container or the endpoint is unreachable. |

@@ -26,7 +26,7 @@ const groupVulnsQuery = `query GroupVulns($fullPath: ID!, $after: String) {
       after: $after
     ) {
       pageInfo { hasNextPage endCursor }
-      nodes { severity reportType project { fullPath } }
+      nodes { severity reportType scanner { name } project { fullPath } }
     }
   }
 }`
@@ -62,7 +62,10 @@ type vulnResponse struct {
 				Nodes []struct {
 					Severity   string `json:"severity"`
 					ReportType string `json:"reportType"`
-					Project    struct {
+					Scanner    struct {
+						Name string `json:"name"`
+					} `json:"scanner"`
+					Project struct {
 						FullPath string `json:"fullPath"`
 					} `json:"project"`
 				} `json:"nodes"`
@@ -134,6 +137,7 @@ func mapVulnerabilities(gr *vulnResponse, into map[string][]provider.Finding) {
 		into[n.Project.FullPath] = append(into[n.Project.FullPath], provider.Finding{
 			Severity: provider.NormalizeSeverity(n.Severity),
 			Category: cat,
+			Tool:     n.Scanner.Name,
 		})
 	}
 }
