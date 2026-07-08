@@ -67,20 +67,14 @@ crds:
   enabled: true
   keep: true
 
-# The operator's own metrics endpoint.
+# The operator's own controller-runtime metrics endpoint. Exposed on the pod for local
+# inspection; not scraped by a chart-managed Service (the product is OTLP-push only). Set
+# bindAddress to "0" to disable.
 metrics:
   bindAddress: ":8080"
-  service:
-    port: 8080
+  port: 8080
 
-# ServiceMonitor for the OPERATOR's own metrics (per-exporter ServiceMonitors are
-# created by the operator, not this chart). Requires the prometheus-operator CRD.
-serviceMonitor:
-  enabled: false
-  interval: 30s
-  labels: {}
-
-# Optional demo CR; off by default so `helm install` does not spin up an exporter.
+# Optional demo CR; off by default so `helm install` does not spin up collection Jobs.
 sampleCR:
   enabled: false
   provider: github
@@ -88,3 +82,5 @@ sampleCR:
   authMode: token
   tokenKey: token
   credentialsSecret: acme-github-credentials
+  # OTLP metrics endpoint the collection Jobs push to (required).
+  otlpEndpoint: http://otel-collector.observability:4318

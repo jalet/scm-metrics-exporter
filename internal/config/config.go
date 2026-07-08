@@ -51,16 +51,20 @@ type GitHubConfig struct {
 	AppInstallationID int64
 	AppPrivateKeyPath string
 	CodeScanningTool  string
+	CollectWorkflows  bool
+	WorkflowLookback  time.Duration
 }
 
 // GitLabConfig holds GitLab provider settings. TargetType selects group (default) or
 // user; exactly the matching field (Group or User) must be set.
 type GitLabConfig struct {
-	TargetType string
-	Group      string
-	User       string
-	Token      string
-	BaseURL    string
+	TargetType       string
+	Group            string
+	User             string
+	Token            string
+	BaseURL          string
+	CollectWorkflows bool
+	WorkflowLookback time.Duration
 }
 
 // Load reads and validates the configuration for the given provider. It fails fast
@@ -83,6 +87,7 @@ func Load(providerName string) (Config, error) {
 			Token:             os.Getenv("GITHUB_TOKEN"),
 			AppPrivateKeyPath: os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH"),
 			CodeScanningTool:  os.Getenv("GITHUB_CODE_SCANNING_TOOL"),
+			CollectWorkflows:  os.Getenv("GITHUB_COLLECT_WORKFLOWS") == "true",
 		}
 		if cfg.GitHub.AppID, err = getenvInt64("GITHUB_APP_ID"); err != nil {
 			return Config{}, err
@@ -90,16 +95,23 @@ func Load(providerName string) (Config, error) {
 		if cfg.GitHub.AppInstallationID, err = getenvInt64("GITHUB_APP_INSTALLATION_ID"); err != nil {
 			return Config{}, err
 		}
+		if cfg.GitHub.WorkflowLookback, err = getenvDuration("GITHUB_WORKFLOW_LOOKBACK", 0); err != nil {
+			return Config{}, err
+		}
 		if err := cfg.GitHub.validate(); err != nil {
 			return Config{}, err
 		}
 	case "gitlab":
 		cfg.GitLab = GitLabConfig{
-			TargetType: getenvDefault("GITLAB_TARGET_TYPE", TargetGroup),
-			Group:      os.Getenv("GITLAB_GROUP"),
-			User:       os.Getenv("GITLAB_USER"),
-			Token:      os.Getenv("GITLAB_TOKEN"),
-			BaseURL:    os.Getenv("GITLAB_URL"),
+			TargetType:       getenvDefault("GITLAB_TARGET_TYPE", TargetGroup),
+			Group:            os.Getenv("GITLAB_GROUP"),
+			User:             os.Getenv("GITLAB_USER"),
+			Token:            os.Getenv("GITLAB_TOKEN"),
+			BaseURL:          os.Getenv("GITLAB_URL"),
+			CollectWorkflows: os.Getenv("GITLAB_COLLECT_WORKFLOWS") == "true",
+		}
+		if cfg.GitLab.WorkflowLookback, err = getenvDuration("GITLAB_WORKFLOW_LOOKBACK", 0); err != nil {
+			return Config{}, err
 		}
 		if err := cfg.GitLab.validate(); err != nil {
 			return Config{}, err

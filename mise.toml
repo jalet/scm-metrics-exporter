@@ -15,7 +15,7 @@ lockfile_platforms = ["macos-arm64", "linux-x64"]
 minimum_release_age = "7d"
 
 [tools]
-go = "1.26"
+go = "1.26.5"
 golangci-lint = "2.10.1"
 helm = "4.2.2"
 "go:sigs.k8s.io/controller-tools/cmd/controller-gen" = "v0.21.0"

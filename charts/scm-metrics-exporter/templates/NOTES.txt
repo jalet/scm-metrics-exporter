@@ -13,9 +13,12 @@ The operator is now watching for custom resources. Create one to start exporting
     tokenKey: token
     credentialsSecret:
       name: my-org-credentials   # a Secret with key "token" = a GitHub PAT
-    serviceMonitor: {{ .Values.serviceMonitor.enabled }}
+    export:
+      otlpEndpoint: http://otel-collector.observability:4318
 
-The operator creates the exporter Deployment, Service{{ if (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}, and (when spec.serviceMonitor is true) a ServiceMonitor{{ end }} for each CR.
+The operator discovers the target's repositories on spec.discoveryInterval and dispatches
+one run-once collection Job per repository (capped by spec.parallelism). Each Job pushes
+its metrics to spec.export.otlpEndpoint over OTLP, so point that at an OTLP collector.
 {{- if not .Values.crds.enabled }}
 
 WARNING: crds.enabled=false -- install the CRDs separately or the custom resources above will be rejected.

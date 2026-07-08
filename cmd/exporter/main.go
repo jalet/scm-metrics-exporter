@@ -33,6 +33,8 @@ var (
 
 func main() {
 	providerName := flag.String("provider", "github", "source-control provider to poll (github|gitlab)")
+	once := flag.Bool("once", false, "collect a single snapshot, push it via OTLP, and exit (run-once mode)")
+	repo := flag.String("repo", "", "with --once, collect only this repository (bare name; the owner is the configured target)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -43,19 +45,19 @@ func main() {
 
 	setupLogging()
 
-	if err := run(context.Background(), *providerName); err != nil {
+	if err := run(context.Background(), *providerName, *once, *repo); err != nil {
 		zlog.Error().Err(err).Msg("exporter failed")
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, providerName string) error {
+func run(ctx context.Context, providerName string, once bool, repo string) error {
 	cfg, err := config.Load(providerName)
 	if err != nil {
 		return err
 	}
 
-	prov, err := buildProvider(cfg)
+	prov, err := buildProvider(cfg, repo)
 	if err != nil {
 		return err
 	}
@@ -63,7 +65,7 @@ func run(ctx context.Context, providerName string) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	coll := collector.New(collector.Entry{Provider: prov, Target: cfg.Target()})
+	coll := collector.New(collector.Entry{Provider: prov, Target: cfg.Target(), Repo: repo})
 
 	mp, recordScrapeErr, err := metrics.Setup(ctx, coll, version, metrics.Dimensions{
 		Ecosystem: cfg.Dimensions.Ecosystem,
@@ -83,16 +85,25 @@ func run(ctx context.Context, providerName string) error {
 	zlog.Info().
 		Str("provider", prov.Name()).
 		Str("target", cfg.Target()).
-		Dur("poll_interval", cfg.PollInterval).
+		Str("repo", repo).
+		Bool("once", once).
 		Str("exporter", os.Getenv("OTEL_METRICS_EXPORTER")).
 		Msg("scm-metrics-exporter starting")
 
-	// Blocks until a signal cancels ctx; autoexport owns the Prometheus HTTP server
-	// (or the periodic OTLP/console reader), stopped by the deferred mp.Shutdown.
+	if once {
+		// Collect one snapshot and return; the deferred mp.Shutdown flushes the pending
+		// snapshot over OTLP and stops the reader (a single export -- no separate
+		// ForceFlush). A hard whole-provider failure returns an error (exit 1); a partial
+		// snapshot (recorded scrape errors) returns nil (exit 0).
+		return coll.PollOnce(ctx, recordScrapeErr)
+	}
+
+	// Blocks until a signal cancels ctx; the periodic OTLP/console reader is stopped by
+	// the deferred mp.Shutdown.
 	return coll.Run(ctx, cfg.PollInterval, recordScrapeErr)
 }
 
-func buildProvider(cfg config.Config) (provider.Provider, error) {
+func buildProvider(cfg config.Config, repo string) (provider.Provider, error) {
 	switch cfg.Provider {
 	case "github":
 		p, err := providergithub.New(providergithub.Options{
@@ -101,7 +112,10 @@ func buildProvider(cfg config.Config) (provider.Provider, error) {
 			AppInstallationID: cfg.GitHub.AppInstallationID,
 			AppPrivateKeyPath: cfg.GitHub.AppPrivateKeyPath,
 			TargetType:        cfg.GitHub.TargetType,
+			RepoScope:         repo,
 			CodeScanningTool:  cfg.GitHub.CodeScanningTool,
+			CollectWorkflows:  cfg.GitHub.CollectWorkflows,
+			WorkflowLookback:  cfg.GitHub.WorkflowLookback,
 		})
 		if err != nil {
 			return nil, err
@@ -109,9 +123,11 @@ func buildProvider(cfg config.Config) (provider.Provider, error) {
 		return p, nil
 	case "gitlab":
 		p, err := providergitlab.New(providergitlab.Options{
-			Token:      cfg.GitLab.Token,
-			TargetType: cfg.GitLab.TargetType,
-			BaseURL:    cfg.GitLab.BaseURL,
+			Token:            cfg.GitLab.Token,
+			TargetType:       cfg.GitLab.TargetType,
+			BaseURL:          cfg.GitLab.BaseURL,
+			CollectWorkflows: cfg.GitLab.CollectWorkflows,
+			WorkflowLookback: cfg.GitLab.WorkflowLookback,
 		})
 		if err != nil {
 			return nil, err

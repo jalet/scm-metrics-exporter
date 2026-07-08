@@ -87,34 +87,53 @@ func (p *Provider) collectCodeScanningForUser(ctx context.Context, user string) 
 
 	skipped := 0
 	for _, repo := range repos {
-		opts := &gh.AlertListOptions{State: "open", ToolName: p.toolName}
-		opts.ListOptions.PerPage = 100
-		for page := 0; page < p.maxPages; page++ {
-			alerts, resp, err := p.rest.CodeScanning.ListAlertsForRepo(ctx, user, repo, opts)
-			if resp != nil {
-				res.rate = int64(resp.Rate.Remaining)
-				res.rateKnown = true
-			}
-			if err != nil {
-				if notAccessible(err) {
-					skipped++
-					break // code scanning disabled / inaccessible on this repo
-				}
-				return res, err
-			}
-			for _, a := range alerts {
-				res.findings[repo] = append(res.findings[repo], codeScanningFinding(a))
-			}
-			if resp == nil || resp.NextPage == 0 {
-				break
-			}
-			opts.ListOptions.Page = resp.NextPage
+		findings, rate, ok, accessible, err := p.codeScanningForRepo(ctx, user, repo)
+		if ok {
+			res.rate, res.rateKnown = rate, true
+		}
+		if err != nil {
+			return res, err
+		}
+		if !accessible {
+			skipped++
+			continue
+		}
+		if len(findings) > 0 {
+			res.findings[repo] = append(res.findings[repo], findings...)
 		}
 	}
 	zlog.Debug().Str("provider", "github").Str("source", "rest").Str("owner", user).
 		Int("repos", len(repos)).Int("repos_skipped", skipped).Int("repos_with_findings", len(res.findings)).
 		Msg("per-repo code scanning complete (user target)")
 	return res, nil
+}
+
+// codeScanningForRepo lists one repository's open code-scanning alerts. accessible is false
+// when code scanning is disabled or inaccessible on the repo (403/404), which callers treat
+// as "no findings" rather than a source failure. Any other API error is returned.
+func (p *Provider) codeScanningForRepo(ctx context.Context, owner, repo string) (findings []provider.Finding, rate int64, rateKnown, accessible bool, err error) {
+	opts := &gh.AlertListOptions{State: "open", ToolName: p.toolName}
+	opts.ListOptions.PerPage = 100
+	for page := 0; page < p.maxPages; page++ {
+		alerts, resp, e := p.rest.CodeScanning.ListAlertsForRepo(ctx, owner, repo, opts)
+		if resp != nil {
+			rate, rateKnown = int64(resp.Rate.Remaining), true
+		}
+		if e != nil {
+			if notAccessible(e) {
+				return findings, rate, rateKnown, false, nil
+			}
+			return findings, rate, rateKnown, false, e
+		}
+		for _, a := range alerts {
+			findings = append(findings, codeScanningFinding(a))
+		}
+		if resp == nil || resp.NextPage == 0 {
+			return findings, rate, rateKnown, true, nil
+		}
+		opts.ListOptions.Page = resp.NextPage
+	}
+	return findings, rate, rateKnown, true, nil
 }
 
 // listUserRepos returns the user's owned repository names plus the latest REST rate

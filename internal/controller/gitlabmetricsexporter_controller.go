@@ -4,97 +4,106 @@ import (
 	"context"
 	"fmt"
 
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	scmv1alpha1 "github.com/jalet/scm-metrics-exporter/api/v1alpha1"
+	"github.com/jalet/scm-metrics-exporter/internal/discovery"
 )
 
-// GitLabMetricsExporterReconciler reconciles a GitLabMetricsExporter into an exporter
-// Deployment, Service, and (optionally) ServiceMonitor. It shares the provider-neutral
-// rendering and reconcile helpers with the GitHub reconciler.
+// GitLabMetricsExporterReconciler discovers a GitLab group's (or user's) projects and
+// dispatches one per-project collection Job for each, capped by spec.parallelism.
 type GitLabMetricsExporterReconciler struct {
 	client.Client
-	Scheme                  *runtime.Scheme
-	ExporterImage           string
-	serviceMonitorAvailable bool
+	Scheme        *runtime.Scheme
+	ExporterImage string
+	// DiscoverProjects lists the target's project paths. Defaults to live GitLab discovery
+	// and is overridable in tests so reconciliation needs no network.
+	DiscoverProjects func(ctx context.Context, auth discovery.GitLabAuth, target, targetType string, sel discovery.Selector) ([]string, error)
+}
+
+func discoverGitLabProjects(ctx context.Context, auth discovery.GitLabAuth, target, targetType string, sel discovery.Selector) ([]string, error) {
+	return discovery.ListGitLabProjects(ctx, auth, target, targetType, sel)
 }
 
 // +kubebuilder:rbac:groups=scm.jalet.io,resources=gitlabmetricsexporters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=scm.jalet.io,resources=gitlabmetricsexporters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=scm.jalet.io,resources=gitlabmetricsexporters/finalizers,verbs=update
 
-// Reconcile ensures the exporter children match the CR and reflects readiness in status.
+// Reconcile discovers projects, dispatches collection Jobs capped by parallelism, and
+// reflects discovery state in the CR status.
 func (r *GitLabMetricsExporterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var cr scmv1alpha1.GitLabMetricsExporter
 	if err := r.Get(ctx, req.NamespacedName, &cr); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if err := r.checkCredentials(ctx, &cr); err != nil {
+	auth, target, err := r.gitlabAuth(ctx, &cr)
+	if err != nil {
 		setReadyCondition(&cr.Status.Conditions, cr.Generation, metav1.ConditionFalse, reasonCredentialInvalid, err.Error())
 		return r.updateStatus(ctx, &cr, ctrl.Result{RequeueAfter: credentialRequeue})
+	}
+
+	discover := r.DiscoverProjects
+	if discover == nil {
+		discover = discoverGitLabProjects
+	}
+	repos := cr.Status.DiscoveredRepositories
+	if needsDiscovery(cr.Status.LastDiscoveryTime, len(repos), cr.Spec.DiscoveryInterval.Duration) {
+		newRepos, derr := discover(ctx, auth, target, cr.Spec.TargetType, selectorFrom(cr.Spec.AutoDiscover))
+		if derr != nil {
+			setReadyCondition(&cr.Status.Conditions, cr.Generation, metav1.ConditionFalse, reasonDiscoveryFailed, derr.Error())
+			return r.updateStatus(ctx, &cr, ctrl.Result{RequeueAfter: credentialRequeue})
+		}
+		repos = newRepos
+		cr.Status.DiscoveredRepositories = repos
+		now := metav1.Now()
+		cr.Status.LastDiscoveryTime = &now
 	}
 
 	image := cr.Spec.Image
 	if image == "" {
 		image = r.ExporterImage
 	}
-
-	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: cr.Name, Namespace: cr.Namespace}}
-	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, dep, func() error {
-		desired := gitlabDeployment(&cr, image)
-		dep.Labels = desired.Labels
-		dep.Spec = desired.Spec
-		return controllerutil.SetControllerReference(&cr, dep, r.Scheme)
-	}); err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconcile deployment: %w", err)
+	pending, err := dispatchJobs(ctx, r.Client, r.Scheme, &cr, cr.Name, cr.Namespace, cr.Spec.Parallelism, repos,
+		func(repo string) *batchv1.Job { return gitlabJob(&cr, image, repo) })
+	if err != nil {
+		setReadyCondition(&cr.Status.Conditions, cr.Generation, metav1.ConditionFalse, reasonDispatchFailed, err.Error())
+		return r.updateStatus(ctx, &cr, ctrl.Result{RequeueAfter: credentialRequeue})
 	}
 
-	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: cr.Name, Namespace: cr.Namespace}}
-	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
-		desired := exporterService(cr.Name, cr.Namespace)
-		svc.Labels = desired.Labels
-		svc.Spec.Selector = desired.Spec.Selector
-		svc.Spec.Ports = desired.Spec.Ports
-		return controllerutil.SetControllerReference(&cr, svc, r.Scheme)
-	}); err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconcile service: %w", err)
+	setReadyCondition(&cr.Status.Conditions, cr.Generation, metav1.ConditionTrue, reasonDiscovered,
+		fmt.Sprintf("discovered %d projects", len(repos)))
+	requeue := cr.Spec.DiscoveryInterval.Duration
+	if pending {
+		requeue = pendingRequeue
 	}
-
-	if err := reconcileServiceMonitor(ctx, r.Client, r.Scheme, &cr, r.serviceMonitorAvailable, cr.Spec.ServiceMonitor); err != nil {
-		return ctrl.Result{}, fmt.Errorf("reconcile servicemonitor: %w", err)
-	}
-
-	if deploymentAvailable(dep) {
-		setReadyCondition(&cr.Status.Conditions, cr.Generation, metav1.ConditionTrue, reasonReconciled, "exporter deployment is available")
-	} else {
-		setReadyCondition(&cr.Status.Conditions, cr.Generation, metav1.ConditionFalse, reasonProgressing, "waiting for exporter deployment to become available")
-	}
-	return r.updateStatus(ctx, &cr, ctrl.Result{})
+	return r.updateStatus(ctx, &cr, ctrl.Result{RequeueAfter: requeue})
 }
 
-func (r *GitLabMetricsExporterReconciler) checkCredentials(ctx context.Context, cr *scmv1alpha1.GitLabMetricsExporter) error {
-	var secret corev1.Secret
-	name := types.NamespacedName{Name: cr.Spec.CredentialsSecret.Name, Namespace: cr.Namespace}
-	if err := r.Get(ctx, name, &secret); err != nil {
+// gitlabAuth loads the token Secret and builds the discovery auth plus the target (group or
+// user). It returns an actionable error when the Secret or the token key is missing.
+func (r *GitLabMetricsExporterReconciler) gitlabAuth(ctx context.Context, cr *scmv1alpha1.GitLabMetricsExporter) (discovery.GitLabAuth, string, error) {
+	secret, err := loadSecret(ctx, r.Client, cr.Namespace, cr.Spec.CredentialsSecret.Name)
+	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("credentials Secret %q not found", cr.Spec.CredentialsSecret.Name)
+			return discovery.GitLabAuth{}, "", fmt.Errorf("credentials Secret %q not found", cr.Spec.CredentialsSecret.Name)
 		}
-		return err
+		return discovery.GitLabAuth{}, "", err
 	}
-	if _, ok := secret.Data[cr.Spec.TokenKey]; !ok {
-		return fmt.Errorf("credentials Secret %q is missing key %q", cr.Spec.CredentialsSecret.Name, cr.Spec.TokenKey)
+	token, ok := secret.Data[cr.Spec.TokenKey]
+	if !ok || len(token) == 0 {
+		return discovery.GitLabAuth{}, "", fmt.Errorf("credentials Secret %q is missing key %q", cr.Spec.CredentialsSecret.Name, cr.Spec.TokenKey)
 	}
-	return nil
+	target := cr.Spec.Group
+	if cr.Spec.TargetType == "user" {
+		target = cr.Spec.User
+	}
+	return discovery.GitLabAuth{Token: string(token), BaseURL: cr.Spec.BaseURL}, target, nil
 }
 
 func (r *GitLabMetricsExporterReconciler) updateStatus(ctx context.Context, cr *scmv1alpha1.GitLabMetricsExporter, result ctrl.Result) (ctrl.Result, error) {
@@ -105,21 +114,11 @@ func (r *GitLabMetricsExporterReconciler) updateStatus(ctx context.Context, cr *
 	return result, nil
 }
 
-// SetupWithManager registers the reconciler and the child objects it owns.
+// SetupWithManager registers the reconciler and the collection Jobs it owns.
 func (r *GitLabMetricsExporterReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	available, err := serviceMonitorInstalled(mgr.GetRESTMapper())
-	if err != nil {
-		ctrl.Log.WithName("setup").Error(err, "could not determine ServiceMonitor CRD availability; assuming absent")
-		available = false
-	}
-	r.serviceMonitorAvailable = available
-
-	b := ctrl.NewControllerManagedBy(mgr).
+	return ctrl.NewControllerManagedBy(mgr).
 		For(&scmv1alpha1.GitLabMetricsExporter{}).
-		Owns(&appsv1.Deployment{}).
-		Owns(&corev1.Service{})
-	if available {
-		b = b.Owns(newServiceMonitor(), builder.OnlyMetadata)
-	}
-	return b.Named("gitlabmetricsexporter").Complete(r)
+		Owns(&batchv1.Job{}).
+		Named("gitlabmetricsexporter").
+		Complete(r)
 }

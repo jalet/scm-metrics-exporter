@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -58,27 +57,28 @@ func TestGitHubExporterReconciledEndToEnd(t *testing.T) {
 	if err := c.Create(ctx, &scmv1alpha1.GitHubMetricsExporter{
 		ObjectMeta: metav1.ObjectMeta{Name: "gh", Namespace: ns.Name},
 		Spec: scmv1alpha1.GitHubMetricsExporterSpec{
-			ExporterSpec: scmv1alpha1.ExporterSpec{CredentialsSecret: corev1.LocalObjectReference{Name: "creds"}},
-			Org:          "octo-org", AuthMode: "token", TokenKey: "token",
+			ExporterSpec: scmv1alpha1.ExporterSpec{
+				Export:            scmv1alpha1.ExportConfig{OTLPEndpoint: "http://otel-collector.observability:4318"},
+				CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+			},
+			Org: "octo-org", AuthMode: "token", TokenKey: "token",
 		},
 	}); err != nil {
 		t.Fatalf("create cr: %v", err)
 	}
 
-	// The operator must create the exporter Deployment and it must become available.
+	// The operator must reconcile the CR end-to-end: stamp observedGeneration and a Ready
+	// condition. (With the fake token, live discovery fails, so Ready is False/DiscoveryFailed
+	// -- which still proves the operator watched and processed the CR without needing real
+	// GitHub credentials or a network mock.)
 	err = wait.PollUntilContextTimeout(ctx, 2*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
-		var dep appsv1.Deployment
-		if err := c.Get(ctx, types.NamespacedName{Name: "gh", Namespace: ns.Name}, &dep); err != nil {
-			return false, nil //nolint:nilerr // not created yet; keep polling
+		var got scmv1alpha1.GitHubMetricsExporter
+		if err := c.Get(ctx, types.NamespacedName{Name: "gh", Namespace: ns.Name}, &got); err != nil {
+			return false, nil //nolint:nilerr // not observed yet; keep polling
 		}
-		for _, cond := range dep.Status.Conditions {
-			if cond.Type == appsv1.DeploymentAvailable && cond.Status == corev1.ConditionTrue {
-				return true, nil
-			}
-		}
-		return false, nil
+		return got.Status.ObservedGeneration == got.Generation && len(got.Status.Conditions) > 0, nil
 	})
 	if err != nil {
-		t.Fatalf("exporter deployment did not become available: %v", err)
+		t.Fatalf("operator did not reconcile the CR: %v", err)
 	}
 }

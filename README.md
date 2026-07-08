@@ -1,10 +1,12 @@
 # scm-metrics-exporter
 
 Polls source-control platforms for open review items and security findings and
-exposes them as [OpenTelemetry](https://opentelemetry.io) metrics. The exporter
-backend (a Prometheus scrape endpoint or an OTLP push) is chosen at runtime from a
-single instrumentation surface. A companion Kubernetes operator reconciles
-per-provider custom resources into exporter Deployments.
+exposes them as [OpenTelemetry](https://opentelemetry.io) metrics, pushed via OTLP. A
+companion Kubernetes operator reconciles per-provider custom resources: it discovers a
+target's repositories on an interval and dispatches one ephemeral run-once collection
+Job per repository (bounded by a parallelism cap), each pushing its metrics over OTLP.
+Applying one custom resource per organization shards collection across independent
+credentials and rate budgets.
 
 - **GitHub** (open pull requests, Dependabot alerts, code scanning alerts, secret scanning alerts).
 - **GitLab** (open merge requests, and vulnerability findings on the Ultimate tier:
@@ -31,6 +33,7 @@ per-provider custom resources into exporter Deployments.
 | `scm.api.rate_limit_remaining` | gauge | provider, resource | `scm_api_rate_limit_remaining` |
 | `scm.exporter.scrape_errors` | counter | provider, source | `scm_exporter_scrape_errors_total` |
 | `scm.repo.info` | gauge | provider, repo, visibility, archived, branch_protected, dependabot_enabled | `scm_repo_info` |
+| `scm.workflow_runs.recent` | gauge | provider, repo, workflow, conclusion | `scm_workflow_runs_recent` |
 
 `severity` is one of `critical`, `high`, `medium`, `low`, or `unknown` (GitHub
 secret-scanning alerts carry no severity). `category` is one of `dependency`,
@@ -47,6 +50,17 @@ dependency-vulnerability alerting is on (GitHub Dependabot alerts, or GitLab dep
 scanning). Some fields are admin-gated, so a token without the required access may report
 them as `false`.
 
+`scm_workflow_runs_recent` (opt-in via `spec.collectWorkflows`) counts recent CI runs in a
+lookback window (`spec.workflowLookback`, default 7d) by `workflow` and `conclusion`;
+in-progress/transient runs are skipped. It is a gauge because collection is run-once per
+cycle: compute a failure ratio in the query, e.g. `failure / (success+failure)`.
+
+- **GitHub**: Actions runs. `workflow` = workflow name, `conclusion` = run conclusion
+  (`success`, `failure`, `cancelled`, ...).
+- **GitLab**: pipelines. `workflow` = pipeline source (`push`, `schedule`,
+  `merge_request_event`, ...), `conclusion` = pipeline status (`success`, `failed`,
+  `canceled`, `skipped`).
+
 - **GitHub** captures posture from the existing GraphQL repo page at no extra API cost.
 - **GitLab** captures posture for **group** targets via a GraphQL sweep of the group's
   projects (visibility, archived, default-branch `branchRules`, and `securityScanners`);
@@ -59,11 +73,11 @@ Example: repos in an org missing branch protection --
 
 | Binary | Path | Role |
 |---|---|---|
-| `exporter` | `cmd/exporter` | Long-running metrics exporter (`--provider github`). |
-| `operator` | `cmd/operator` | Controller-manager reconciling `GitHubMetricsExporter` / `GitLabMetricsExporter` CRs. |
+| `exporter` | `cmd/exporter` | Metrics collector. In-cluster it runs once per repo (`--provider github --once --repo <name>`), pushes OTLP, and exits; it can also run a full-target poll for local use. |
+| `operator` | `cmd/operator` | Controller-manager reconciling `GitHubMetricsExporter` / `GitLabMetricsExporter` CRs: discovery + per-repo Job dispatch. |
 
 Both binaries ship in one container image; the operator's entrypoint is `/operator`
-and the exporter Deployments it creates override the command to `/exporter`.
+and the collection Jobs it dispatches override the command to `/exporter`.
 
 ## Install the operator (Helm)
 
@@ -89,10 +103,10 @@ Useful values (see `charts/scm-metrics-exporter/values.yaml` for the full set):
 | Value | Default | Purpose |
 |---|---|---|
 | `image.repository` / `image.tag` | `ghcr.io/jalet/scm-metrics-exporter` / chart appVersion | Operator image. |
-| `exporterImage.repository` | (operator image) | Image injected into exporter Deployments. |
+| `exporterImage.repository` | (operator image) | Image injected into the collection Jobs. |
 | `replicaCount` / `leaderElection.enabled` | `1` / `true` | HA via leader election. |
 | `crds.enabled` / `crds.keep` | `true` / `true` | Manage CRDs; keep them on uninstall. |
-| `serviceMonitor.enabled` | `false` | ServiceMonitor for the operator's own metrics (needs prometheus-operator). |
+| `metrics.bindAddress` | `:8080` | Operator's own controller-runtime metrics port (not scraped by the chart; set `0` to disable). |
 | `watchNamespaces` | (all) | Reserved for namespaced mode. |
 
 ## Custom resource examples
@@ -118,11 +132,22 @@ spec:
   tokenKey: token                 # key in the Secret
   credentialsSecret:
     name: acme-github
-  pollInterval: 5m
-  serviceMonitor: true            # operator creates a ServiceMonitor for the exporter
   export:
-    exporter: prometheus
+    otlpEndpoint: http://otel-collector.observability:4318   # required: where collection Jobs push
+  discoveryInterval: 15m          # how often to re-discover + re-dispatch
+  parallelism: 3                  # max concurrent collection Jobs (rate-limit governor)
+  autoDiscover:                   # optional; empty include matches all repos
+    include:
+      visibility: [private, internal]
+      namePatterns: ["service-*"]
+    exclude:                      # removed from the include set; empty excludes nothing
+      archived: true
+      topics: [deprecated]
 ```
+
+`autoDiscover.include` picks the candidate repositories (empty matches all); `exclude` then
+drops any repo that matches every criterion it sets. Criteria within a block are ANDed;
+`namePatterns` are shell globs (GitHub matches the bare name, GitLab the full path).
 
 **GitHub, App auth:** create a Secret with the App private key (PEM), then:
 
@@ -141,7 +166,13 @@ spec:
   credentialsSecret:
     name: acme-github-app
   codeScanningTool: CodeQL         # optional: count only this SARIF tool
+  export:
+    otlpEndpoint: http://otel-collector.observability:4318
 ```
+
+With App auth, each collection Job mints a repository-scoped installation token (least
+privilege). Install one App per organization to give each `GitHubMetricsExporter` its own
+rate budget.
 
 **GitLab:** create a Secret with a group or personal access token under `token`, then:
 
@@ -157,10 +188,14 @@ spec:
   credentialsSecret:
     name: acme-gitlab
   baseURL: https://gitlab.com      # or your self-hosted instance
+  export:
+    otlpEndpoint: http://otel-collector.observability:4318
 ```
 
-Vulnerability findings require GitLab Ultimate; open merge-request counts work on all
-tiers.
+The operator discovers the group's projects (including subgroups) and dispatches one
+collection Job per project, keyed by `path_with_namespace`. Vulnerability findings require
+GitLab Ultimate; open merge-request counts and posture work on all tiers. GitLab has no
+per-project token scoping, so Jobs use the configured group/personal token.
 
 Inspect status:
 
@@ -171,18 +206,18 @@ kubectl describe ghme acme -n scm-system                                # see th
 
 ## Run the exporter directly
 
-For local development, without Kubernetes:
+For local development, without Kubernetes. Collect a single repository once and print the
+metrics as JSON (the console exporter needs no OTLP collector):
 
 ```sh
+OTEL_METRICS_EXPORTER=console LOG_FORMAT=console \
 GITHUB_ORG=acme GITHUB_TOKEN=ghp_xxx \
-OTEL_METRICS_EXPORTER=prometheus OTEL_EXPORTER_PROMETHEUS_HOST=0.0.0.0 \
-  go run ./cmd/exporter
-curl -s localhost:9464/metrics | grep '^scm_'
+  go run ./cmd/exporter --provider=github --once --repo=my-repo
 ```
 
-To push OTLP instead, set `OTEL_METRICS_EXPORTER=otlp` and
-`OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`; for a quick local smoke test use
-`OTEL_METRICS_EXPORTER=console` (metrics are printed as JSON on the export interval).
+`--once --repo=<name>` collects just `<org>/<name>` and exits (the owner is the target env).
+Drop those flags to run a full-target poll of the whole org. To push OTLP instead of
+printing, set `OTEL_METRICS_EXPORTER=otlp` and `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`.
 
 ## Configuration
 
@@ -196,13 +231,14 @@ The exporter is configured entirely by environment variables.
 | `GITHUB_APP_ID` / `GITHUB_APP_INSTALLATION_ID` / `GITHUB_APP_PRIVATE_KEY_PATH` | | GitHub App auth. |
 | `GITHUB_CODE_SCANNING_TOOL` | (all tools) | Optional SARIF tool filter (for example `CodeQL`). |
 | `SCM_FINDING_DIMENSIONS` | (none) | Comma list of optional finding labels: `ecosystem`, `tool`. Off by default (raises cardinality). |
-| `POLL_INTERVAL` | `5m` | Poll cadence (Go duration, must be positive). |
-| `OTEL_METRICS_EXPORTER` | `otlp` | `prometheus`, `otlp`, or `console`. |
-| `OTEL_EXPORTER_PROMETHEUS_HOST` | `localhost` | Set to `0.0.0.0` in a container or the endpoint is unreachable. |
-| `OTEL_EXPORTER_PROMETHEUS_PORT` | `9464` | Prometheus scrape port. |
-| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | | OTLP push target. |
-| `OTEL_METRIC_EXPORT_INTERVAL` | `60s` | Push interval (otlp/console). |
+| `POLL_INTERVAL` | `5m` | Poll cadence for the full-target (non-`--once`) mode. |
+| `OTEL_METRICS_EXPORTER` | `otlp` | `otlp` or `console`. The Prometheus pull backend has been removed. |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | | OTLP push target (required in `otlp` mode). |
+| `OTEL_METRIC_EXPORT_INTERVAL` | `60s` | Push interval for the long-running mode (irrelevant to `--once`). |
 | `LOG_LEVEL` / `LOG_FORMAT` | `info` / json | zerolog level; `LOG_FORMAT=console` for human output. |
+
+The `--once`/`--repo` run mode is set by CLI flags, not env; in-cluster the operator passes
+them to each collection Job.
 
 **Auth precedence:** if the full App trio is set it is used; otherwise `GITHUB_TOKEN`;
 otherwise startup fails. Provide credentials by env var or file path only -- never
@@ -240,10 +276,11 @@ After changing API types or RBAC markers, run `mise run generate manifests` and
   `source="secret_scanning"` is often the token missing secret-scanning access.
 - **CR stuck `Ready=False` / `CredentialsInvalid`** -- the referenced Secret is missing
   or lacks the key named by `tokenKey` / `appPrivateKeyKey`.
-- **No `scm_*` series** -- the first poll has not completed or all sources failed; the
-  exporter caches the last good snapshot and keeps serving.
-- **Prometheus cannot scrape** -- set `OTEL_EXPORTER_PROMETHEUS_HOST=0.0.0.0` (the
-  operator sets this automatically for exporter Deployments).
+- **No `scm_*` series at the collector** -- collection Jobs push over OTLP, so confirm
+  `export.otlpEndpoint` is reachable from the Job pods and the OTLP collector is ingesting;
+  check the Job logs (`kubectl logs job/<name>`).
+- **CR `Ready=False` / `DiscoveryFailed`** -- the operator could not list repositories:
+  check the credentials and that the token/App can see the target's repos/projects.
 
 ## Documentation
 

@@ -163,6 +163,36 @@ func TestObservableRepoInfo(t *testing.T) {
 	metricdatatest.AssertAggregationsEqual(t, want, collect(t, reader)[metricRepoInfo], metricdatatest.IgnoreTimestamp())
 }
 
+func TestObservableWorkflowRuns(t *testing.T) {
+	src := fakeSource{
+		names: []string{"github"},
+		snapshots: map[string]provider.Snapshot{
+			"github": {Repos: []provider.RepoMetrics{{
+				Name: "alpha",
+				WorkflowRuns: []provider.WorkflowRunStat{
+					{Workflow: "ci", Conclusion: "success", Count: 8},
+					{Workflow: "ci", Conclusion: "failure", Count: 2},
+				},
+			}}},
+		},
+	}
+	reader, _ := setupReader(t, src, Dimensions{})
+
+	gh := func(workflow, conclusion string) attribute.Set {
+		return attribute.NewSet(
+			attribute.String(attrProvider, "github"),
+			attribute.String(attrRepo, "alpha"),
+			attribute.String(attrWorkflow, workflow),
+			attribute.String(attrConclusion, conclusion),
+		)
+	}
+	want := metricdata.Gauge[int64]{DataPoints: []metricdata.DataPoint[int64]{
+		{Attributes: gh("ci", "success"), Value: 8},
+		{Attributes: gh("ci", "failure"), Value: 2},
+	}}
+	metricdatatest.AssertAggregationsEqual(t, want, collect(t, reader)[metricWorkflowRuns], metricdatatest.IgnoreTimestamp())
+}
+
 func TestScrapeErrorCounter(t *testing.T) {
 	reader, record := setupReader(t, fakeSource{}, Dimensions{})
 

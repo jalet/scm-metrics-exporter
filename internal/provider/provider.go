@@ -16,6 +16,7 @@ package provider
 
 import (
 	"context"
+	"slices"
 	"strings"
 )
 
@@ -33,6 +34,21 @@ type Provider interface {
 	// where one data source fails while others succeed, is reported in
 	// Snapshot.SourceErrors with a nil error and whatever data was collected.
 	Snapshot(ctx context.Context, target string) (Snapshot, error)
+}
+
+// RepoSnapshotter is an optional capability for providers that can collect a single
+// repository in isolation. It powers the per-repo collection path (operator-dispatched
+// run-once Jobs), where each Job scopes its credentials and API calls to one repository.
+//
+// It is deliberately separate from Provider so a provider can add the capability without
+// forcing every provider to implement it: callers type-assert for it and fall back to
+// Snapshot when it is absent.
+type RepoSnapshotter interface {
+	// SnapshotRepo polls a single repository identified by owner and repo name, returning
+	// a Snapshot containing just that repository. Error semantics match Provider.Snapshot:
+	// a returned error means nothing usable was collected, while partial degradation is
+	// reported in Snapshot.SourceErrors with a nil error.
+	SnapshotRepo(ctx context.Context, owner, repo string) (Snapshot, error)
 }
 
 // Snapshot is the immutable result of one poll of a Provider.
@@ -58,6 +74,44 @@ type RepoMetrics struct {
 	// Posture is the repository's security-posture snapshot, or nil when the provider
 	// did not capture it (feeds the scm.repo.info gauge). It is treated as immutable.
 	Posture *RepoPosture
+	// WorkflowRuns tallies recent CI workflow-run outcomes (GitHub Actions) within a
+	// lookback window. It is populated only when workflow collection is enabled, and feeds
+	// the scm.workflow_runs.recent gauge.
+	WorkflowRuns []WorkflowRunStat
+}
+
+// WorkflowRunStat is the count of recent CI runs for one workflow and conclusion (for
+// example workflow "ci", conclusion "failure", count 3).
+type WorkflowRunStat struct {
+	// Workflow is the workflow name (GitHub Actions workflow / run name).
+	Workflow string
+	// Conclusion is the run conclusion, lowercased (success, failure, cancelled, ...).
+	Conclusion string
+	// Count is the number of runs with this (workflow, conclusion) in the lookback window.
+	Count int
+}
+
+// WorkflowRunStatsFromTally flattens a workflow -> conclusion -> count tally into a slice
+// sorted by workflow then conclusion, for a stable, low-cardinality series set. Providers
+// build the tally while paging their CI runs.
+func WorkflowRunStatsFromTally(tally map[string]map[string]int) []WorkflowRunStat {
+	stats := make([]WorkflowRunStat, 0, len(tally))
+	workflows := make([]string, 0, len(tally))
+	for w := range tally {
+		workflows = append(workflows, w)
+	}
+	slices.Sort(workflows)
+	for _, w := range workflows {
+		conclusions := make([]string, 0, len(tally[w]))
+		for c := range tally[w] {
+			conclusions = append(conclusions, c)
+		}
+		slices.Sort(conclusions)
+		for _, c := range conclusions {
+			stats = append(stats, WorkflowRunStat{Workflow: w, Conclusion: c, Count: tally[w][c]})
+		}
+	}
+	return stats
 }
 
 // RepoPosture is a repository's security-configuration snapshot. Some fields are
@@ -129,6 +183,7 @@ const (
 	SourceGraphQL        = "graphql"
 	SourceREST           = "rest"
 	SourceSecretScanning = "secret_scanning"
+	SourceWorkflows      = "workflows"
 )
 
 // API resources, emitted on the "resource" attribute of

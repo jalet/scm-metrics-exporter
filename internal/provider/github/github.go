@@ -14,6 +14,7 @@ import (
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/failsafe-go/failsafe-go/failsafehttp"
+	ghv88 "github.com/google/go-github/v88/github" // only for ghinstallation.Transport.InstallationTokenOptions (the go-github major ghinstallation/v2 bundles); everything else uses gh (v89)
 	gh "github.com/google/go-github/v89/github"
 	zlog "github.com/rs/zerolog/log"
 
@@ -44,22 +45,38 @@ type Options struct {
 	AppInstallationID int64
 	AppPrivateKeyPath string
 	TargetType        string // "org" (default) or "user"
-	CodeScanningTool  string // SARIF tool filter; empty counts all tools
-	BaseURL           string // REST base URL override (must accept a trailing slash)
-	GraphQLURL        string // GraphQL endpoint override
-	HTTPClient        *http.Client
+	// RepoScope, when set with GitHub App auth, restricts the minted installation token to
+	// that single repository (least privilege). Used by run-once per-repo collection; it
+	// has no effect with PAT auth.
+	RepoScope string
+	// CollectWorkflows enables recent GitHub Actions workflow-run collection in SnapshotRepo.
+	CollectWorkflows bool
+	// WorkflowLookback bounds how far back workflow runs are counted (default 7 days).
+	WorkflowLookback time.Duration
+	CodeScanningTool string // SARIF tool filter; empty counts all tools
+	BaseURL          string // REST base URL override (must accept a trailing slash)
+	GraphQLURL       string // GraphQL endpoint override
+	HTTPClient       *http.Client
 }
 
 // Provider polls a GitHub organization or user for review items and security findings.
 type Provider struct {
-	rest       *gh.Client
-	graphql    *graphqlClient
-	toolName   string
-	targetType string
-	maxPages   int
+	rest             *gh.Client
+	graphql          *graphqlClient
+	toolName         string
+	targetType       string
+	maxPages         int
+	collectWorkflows bool
+	workflowLookback time.Duration
 }
 
-var _ provider.Provider = (*Provider)(nil)
+// defaultWorkflowLookback bounds recent workflow-run collection when unset.
+const defaultWorkflowLookback = 7 * 24 * time.Hour
+
+var (
+	_ provider.Provider        = (*Provider)(nil)
+	_ provider.RepoSnapshotter = (*Provider)(nil)
+)
 
 // New builds a GitHub provider from opts, selecting the authentication method and
 // wiring a retry/backoff transport that honors Retry-After.
@@ -89,12 +106,19 @@ func New(opts Options) (*Provider, error) {
 		targetType = targetOrg
 	}
 
+	lookback := opts.WorkflowLookback
+	if lookback <= 0 {
+		lookback = defaultWorkflowLookback
+	}
+
 	return &Provider{
-		rest:       rest,
-		graphql:    &graphqlClient{httpClient: httpClient, endpoint: endpoint},
-		toolName:   opts.CodeScanningTool,
-		targetType: targetType,
-		maxPages:   defaultMaxPages,
+		rest:             rest,
+		graphql:          &graphqlClient{httpClient: httpClient, endpoint: endpoint},
+		toolName:         opts.CodeScanningTool,
+		targetType:       targetType,
+		maxPages:         defaultMaxPages,
+		collectWorkflows: opts.CollectWorkflows,
+		workflowLookback: lookback,
 	}, nil
 }
 
@@ -144,6 +168,70 @@ func (p *Provider) Snapshot(ctx context.Context, target string) (provider.Snapsh
 	zlog.Debug().Str("provider", "github").Str("target", target).
 		Int("repos", len(snap.Repos)).Int("rate_limits", len(snap.RateLimits)).
 		Msg("github snapshot assembled")
+	return snap, nil
+}
+
+// SnapshotRepo polls a single repository (the per-repo collection path used by
+// operator-dispatched run-once Jobs). It mirrors Snapshot but scopes every source to one
+// repo: GraphQL for open PRs, Dependabot findings, and posture; REST for code scanning and
+// secret scanning. Each failing source is recorded in SourceErrors and yields a partial
+// snapshot; only when every source fails does it return an error.
+func (p *Provider) SnapshotRepo(ctx context.Context, owner, repo string) (provider.Snapshot, error) {
+	gql, gqlRate, gqlKnown, gqlErr := p.collectRepoGraphQL(ctx, owner, repo)
+	csFindings, csRate, csKnown, _, csErr := p.codeScanningForRepo(ctx, owner, repo)
+	ssFindings, ssRate, ssKnown, _, ssErr := p.secretScanningForRepo(ctx, owner, repo)
+
+	if gqlErr != nil && csErr != nil && ssErr != nil {
+		return provider.Snapshot{}, fmt.Errorf("github: all sources failed for %s/%s: %w", owner, repo, errors.Join(gqlErr, csErr, ssErr))
+	}
+
+	var gqlRepos []graphqlRepo
+	if gqlErr == nil {
+		gqlRepos = []graphqlRepo{gql}
+	}
+	snap := provider.Snapshot{Repos: mergeRepos(gqlRepos,
+		map[string][]provider.Finding{repo: csFindings},
+		map[string][]provider.Finding{repo: ssFindings},
+	)}
+	if gqlKnown {
+		snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceGraphQL, Remaining: gqlRate})
+	}
+	// Code scanning and secret scanning share the REST rate-limit budget; report it once.
+	restRate, restKnown := csRate, csKnown
+	if !restKnown && ssKnown {
+		restRate, restKnown = ssRate, true
+	}
+	if restKnown {
+		snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceREST, Remaining: restRate})
+	}
+	if gqlErr != nil {
+		zlog.Warn().Err(gqlErr).Str("provider", "github").Str("source", provider.SourceGraphQL).Str("repo", owner+"/"+repo).
+			Msg("source failed; snapshot is partial")
+		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceGraphQL})
+	}
+	if csErr != nil {
+		zlog.Warn().Err(csErr).Str("provider", "github").Str("source", provider.SourceREST).Str("repo", owner+"/"+repo).
+			Msg("source failed; snapshot is partial")
+		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceREST})
+	}
+	if ssErr != nil {
+		zlog.Warn().Err(ssErr).Str("provider", "github").Str("source", provider.SourceSecretScanning).Str("repo", owner+"/"+repo).
+			Msg("source failed; snapshot is partial")
+		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceSecretScanning})
+	}
+	// Workflow-run collection is opt-in and supplementary: never fatal, and a failure is a
+	// partial (recorded) source error, not a lost snapshot.
+	if p.collectWorkflows {
+		if stats, wfErr := p.collectWorkflowRuns(ctx, owner, repo); wfErr != nil {
+			zlog.Warn().Err(wfErr).Str("provider", "github").Str("source", provider.SourceWorkflows).Str("repo", owner+"/"+repo).
+				Msg("source failed; snapshot is partial")
+			snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceWorkflows})
+		} else if len(snap.Repos) > 0 {
+			snap.Repos[0].WorkflowRuns = stats
+		}
+	}
+	zlog.Debug().Str("provider", "github").Str("repo", owner+"/"+repo).
+		Int("repos", len(snap.Repos)).Int("rate_limits", len(snap.RateLimits)).Msg("github repo snapshot assembled")
 	return snap, nil
 }
 
@@ -224,6 +312,10 @@ func authTransport(opts Options, base http.RoundTripper) (http.RoundTripper, err
 		itr, err := ghinstallation.NewKeyFromFile(base, opts.AppID, opts.AppInstallationID, opts.AppPrivateKeyPath)
 		if err != nil {
 			return nil, fmt.Errorf("github: app auth: %w", err)
+		}
+		if opts.RepoScope != "" {
+			// Scope the minted installation token to the single repository (least privilege).
+			itr.InstallationTokenOptions = &ghv88.InstallationTokenOptions{Repositories: []string{opts.RepoScope}}
 		}
 		return itr, nil
 	case opts.Token != "":
