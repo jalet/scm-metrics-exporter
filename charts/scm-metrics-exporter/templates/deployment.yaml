@@ -46,7 +46,7 @@ spec:
               value: {{ include "scm-metrics-exporter.exporterImage" . | quote }}
           ports:
             - name: metrics
-              containerPort: {{ .Values.metrics.service.port }}
+              containerPort: {{ .Values.metrics.port }}
             - name: health
               containerPort: 8081
             - name: webhook

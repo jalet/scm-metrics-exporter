@@ -91,16 +91,11 @@ func run(ctx context.Context, providerName string, once bool, repo string) error
 		Msg("scm-metrics-exporter starting")
 
 	if once {
-		// Collect one snapshot, force an OTLP flush, and return. The deferred Shutdown
-		// stops the reader. A hard whole-provider failure returns an error (exit 1); a
-		// partial snapshot (recorded scrape errors) returns nil (exit 0).
-		pollErr := coll.PollOnce(ctx, recordScrapeErr)
-		flushCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := mp.ForceFlush(flushCtx); err != nil {
-			zlog.Warn().Err(err).Msg("metrics force flush")
-		}
-		return pollErr
+		// Collect one snapshot and return; the deferred mp.Shutdown flushes the pending
+		// snapshot over OTLP and stops the reader (a single export -- no separate
+		// ForceFlush). A hard whole-provider failure returns an error (exit 1); a partial
+		// snapshot (recorded scrape errors) returns nil (exit 0).
+		return coll.PollOnce(ctx, recordScrapeErr)
 	}
 
 	// Blocks until a signal cancels ctx; the periodic OTLP/console reader is stopped by

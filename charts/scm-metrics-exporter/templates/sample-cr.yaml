@@ -12,4 +12,6 @@ spec:
   tokenKey: {{ .Values.sampleCR.tokenKey | quote }}
   credentialsSecret:
     name: {{ .Values.sampleCR.credentialsSecret | quote }}
+  export:
+    otlpEndpoint: {{ .Values.sampleCR.otlpEndpoint | quote }}
 {{- end }}

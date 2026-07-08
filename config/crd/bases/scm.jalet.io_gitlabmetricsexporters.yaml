@@ -58,6 +58,79 @@ spec:
           spec:
             description: GitLabMetricsExporterSpec configures a GitLab metrics exporter.
             properties:
+              autoDiscover:
+                description: AutoDiscover filters which repositories the operator
+                  collects.
+                properties:
+                  exclude:
+                    description: |-
+                      Exclude removes repositories from the Include set. Reserved: the schema is stable but
+                      exclusion is not yet enforced.
+                    properties:
+                      archived:
+                        description: |-
+                          Archived, when set, matches only archived (true) or only non-archived (false)
+                          repositories; unset matches both.
+                        type: boolean
+                      namePatterns:
+                        description: |-
+                          NamePatterns matches repository names against these shell-style globs (for example
+                          "service-*").
+                        items:
+                          type: string
+                        type: array
+                      topics:
+                        description: Topics matches repositories carrying any of these
+                          topics.
+                        items:
+                          type: string
+                        type: array
+                      visibility:
+                        description: Visibility matches repositories with any of these
+                          visibilities.
+                        items:
+                          enum:
+                          - public
+                          - private
+                          - internal
+                          type: string
+                        type: array
+                    type: object
+                  include:
+                    description: |-
+                      Include selects repositories to collect. An empty Include matches every repository
+                      in the target.
+                    properties:
+                      archived:
+                        description: |-
+                          Archived, when set, matches only archived (true) or only non-archived (false)
+                          repositories; unset matches both.
+                        type: boolean
+                      namePatterns:
+                        description: |-
+                          NamePatterns matches repository names against these shell-style globs (for example
+                          "service-*").
+                        items:
+                          type: string
+                        type: array
+                      topics:
+                        description: Topics matches repositories carrying any of these
+                          topics.
+                        items:
+                          type: string
+                        type: array
+                      visibility:
+                        description: Visibility matches repositories with any of these
+                          visibilities.
+                        items:
+                          enum:
+                          - public
+                          - private
+                          - internal
+                          type: string
+                        type: array
+                    type: object
+                type: object
               baseURL:
                 description: |-
                   BaseURL is the GitLab API base URL for a self-hosted instance. Empty targets
@@ -79,20 +152,25 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              discoveryInterval:
+                default: 15m
+                description: |-
+                  DiscoveryInterval is how often the operator re-discovers repositories and
+                  re-dispatches collection Jobs.
+                type: string
               export:
-                description: Export selects and tunes how metrics leave the exporter.
+                description: Export configures how metrics leave the collection Jobs
+                  (OTLP push).
                 properties:
-                  exporter:
-                    default: prometheus
-                    description: Exporter selects the OTEL metrics exporter backend.
-                    enum:
-                    - prometheus
-                    - otlp
-                    type: string
                   otlpEndpoint:
-                    description: OTLPEndpoint is the OTLP metrics endpoint, used when
-                      Exporter is "otlp".
+                    description: |-
+                      OTLPEndpoint is the OTLP metrics endpoint the collection Jobs push to (for example
+                      "http://otel-collector.observability:4318"). Required: ephemeral Jobs cannot be
+                      scraped, so there is always a push target.
+                    minLength: 1
                     type: string
+                required:
+                - otlpEndpoint
                 type: object
               findingDimensions:
                 description: |-
@@ -110,21 +188,21 @@ spec:
                 type: string
               image:
                 description: |-
-                  Image overrides the exporter container image. When empty the operator injects
-                  its own image reference.
+                  Image overrides the exporter container image run by the collection Jobs. When empty
+                  the operator injects its own image reference.
                 type: string
-              pollInterval:
-                default: 5m
-                description: PollInterval is how often the exporter polls the provider.
-                type: string
-              replicas:
-                default: 1
-                description: Replicas is the number of exporter pods.
+              parallelism:
+                default: 3
+                description: |-
+                  Parallelism caps the number of concurrent per-repo collection Jobs. It is the
+                  rate-limit governor: it bounds concurrent API pressure on the shared credential and
+                  keeps request bursts under the provider's secondary limits.
                 format: int32
                 minimum: 1
                 type: integer
               resources:
-                description: Resources are the exporter container's compute resources.
+                description: Resources are the collection Job container's compute
+                  resources.
                 properties:
                   claims:
                     description: |-
@@ -182,11 +260,6 @@ spec:
                       More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                     type: object
                 type: object
-              serviceMonitor:
-                description: |-
-                  ServiceMonitor, when true, makes the operator create a Prometheus Operator
-                  ServiceMonitor for the exporter (requires the ServiceMonitor CRD present).
-                type: boolean
               targetType:
                 default: group
                 description: |-
@@ -208,6 +281,7 @@ spec:
                 type: string
             required:
             - credentialsSecret
+            - export
             - tokenKey
             type: object
             x-kubernetes-validations:
@@ -280,6 +354,17 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              discoveredRepositories:
+                description: |-
+                  DiscoveredRepositories lists the repositories found at the last successful discovery,
+                  that the operator dispatches collection Jobs for.
+                items:
+                  type: string
+                type: array
+              lastDiscoveryTime:
+                description: LastDiscoveryTime is when discovery last succeeded.
+                format: date-time
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the .metadata.generation most recently
                   reconciled.
