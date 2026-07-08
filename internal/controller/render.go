@@ -6,6 +6,7 @@ package controller
 
 import (
 	"strconv"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -100,18 +101,22 @@ func exporterService(name, namespace string) *corev1.Service {
 	}
 }
 
-// commonExporterEnv returns the OTel + poll-interval env shared by every provider.
-func commonExporterEnv(export scmv1alpha1.ExportConfig, poll metav1.Duration) []corev1.EnvVar {
+// commonExporterEnv returns the OTel, poll-interval, and finding-dimension env shared by
+// every provider.
+func commonExporterEnv(spec scmv1alpha1.ExporterSpec) []corev1.EnvVar {
 	env := []corev1.EnvVar{
-		{Name: "OTEL_METRICS_EXPORTER", Value: exporterBackend(export)},
+		{Name: "OTEL_METRICS_EXPORTER", Value: exporterBackend(spec.Export)},
 		{Name: "OTEL_EXPORTER_PROMETHEUS_HOST", Value: "0.0.0.0"},
 		{Name: "OTEL_EXPORTER_PROMETHEUS_PORT", Value: strconv.Itoa(metricsPort)},
 	}
-	if poll.Duration > 0 {
-		env = append(env, corev1.EnvVar{Name: "POLL_INTERVAL", Value: poll.Duration.String()})
+	if spec.PollInterval.Duration > 0 {
+		env = append(env, corev1.EnvVar{Name: "POLL_INTERVAL", Value: spec.PollInterval.Duration.String()})
 	}
-	if export.Exporter == "otlp" && export.OTLPEndpoint != "" {
-		env = append(env, corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", Value: export.OTLPEndpoint})
+	if spec.Export.Exporter == "otlp" && spec.Export.OTLPEndpoint != "" {
+		env = append(env, corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", Value: spec.Export.OTLPEndpoint})
+	}
+	if len(spec.FindingDimensions) > 0 {
+		env = append(env, corev1.EnvVar{Name: "SCM_FINDING_DIMENSIONS", Value: strings.Join(spec.FindingDimensions, ",")})
 	}
 	return env
 }
@@ -142,7 +147,7 @@ func githubEnv(cr *scmv1alpha1.GitHubMetricsExporter) []corev1.EnvVar {
 		{Name: "GITHUB_TARGET_TYPE", Value: cr.Spec.TargetType},
 		{Name: "GITHUB_ORG", Value: cr.Spec.Org},
 		{Name: "GITHUB_USER", Value: cr.Spec.User},
-	}, commonExporterEnv(cr.Spec.Export, cr.Spec.PollInterval)...)
+	}, commonExporterEnv(cr.Spec.ExporterSpec)...)
 	if cr.Spec.CodeScanningTool != "" {
 		env = append(env, corev1.EnvVar{Name: "GITHUB_CODE_SCANNING_TOOL", Value: cr.Spec.CodeScanningTool})
 	}
@@ -198,7 +203,7 @@ func gitlabEnv(cr *scmv1alpha1.GitLabMetricsExporter) []corev1.EnvVar {
 		{Name: "GITLAB_TARGET_TYPE", Value: cr.Spec.TargetType},
 		{Name: "GITLAB_GROUP", Value: cr.Spec.Group},
 		{Name: "GITLAB_USER", Value: cr.Spec.User},
-	}, commonExporterEnv(cr.Spec.Export, cr.Spec.PollInterval)...)
+	}, commonExporterEnv(cr.Spec.ExporterSpec)...)
 	if cr.Spec.BaseURL != "" {
 		env = append(env, corev1.EnvVar{Name: "GITLAB_URL", Value: cr.Spec.BaseURL})
 	}

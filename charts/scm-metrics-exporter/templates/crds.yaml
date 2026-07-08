@@ -122,6 +122,17 @@ spec:
                       Exporter is "otlp".
                     type: string
                 type: object
+              findingDimensions:
+                description: |-
+                  FindingDimensions adds optional labels to the security-findings metric: "ecosystem"
+                  (Dependabot package ecosystem) and "tool" (scanning tool). Off by default because
+                  they multiply series cardinality.
+                items:
+                  enum:
+                  - ecosystem
+                  - tool
+                  type: string
+                type: array
               image:
                 description: |-
                   Image overrides the exporter container image. When empty the operator injects
@@ -411,6 +422,17 @@ spec:
                       Exporter is "otlp".
                     type: string
                 type: object
+              findingDimensions:
+                description: |-
+                  FindingDimensions adds optional labels to the security-findings metric: "ecosystem"
+                  (Dependabot package ecosystem) and "tool" (scanning tool). Off by default because
+                  they multiply series cardinality.
+                items:
+                  enum:
+                  - ecosystem
+                  - tool
+                  type: string
+                type: array
               group:
                 description: Group is the GitLab group to poll (targetType "group").
                 type: string

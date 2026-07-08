@@ -8,7 +8,7 @@ import (
 var envKeys = []string{
 	"GITHUB_TARGET_TYPE", "GITHUB_ORG", "GITHUB_USER", "GITHUB_TOKEN", "GITHUB_APP_ID",
 	"GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY_PATH", "GITHUB_CODE_SCANNING_TOOL",
-	"POLL_INTERVAL",
+	"POLL_INTERVAL", "SCM_FINDING_DIMENSIONS",
 	"GITLAB_TARGET_TYPE", "GITLAB_GROUP", "GITLAB_USER", "GITLAB_TOKEN", "GITLAB_URL",
 }
 
@@ -72,6 +72,24 @@ func TestLoad(t *testing.T) {
 				}
 				if c.GitHub.TargetType != TargetUser {
 					t.Errorf("TargetType = %q, want user", c.GitHub.TargetType)
+				}
+			},
+		},
+		{
+			name: "finding dimensions", provider: "github",
+			env: map[string]string{"GITHUB_ORG": "acme", "GITHUB_TOKEN": "ghp_x", "SCM_FINDING_DIMENSIONS": "ecosystem, tool"},
+			check: func(t *testing.T, c Config) {
+				if !c.Dimensions.Ecosystem || !c.Dimensions.Tool {
+					t.Errorf("Dimensions = %+v, want both ecosystem and tool", c.Dimensions)
+				}
+			},
+		},
+		{
+			name: "no finding dimensions by default", provider: "github",
+			env: map[string]string{"GITHUB_ORG": "acme", "GITHUB_TOKEN": "ghp_x"},
+			check: func(t *testing.T, c Config) {
+				if c.Dimensions.Ecosystem || c.Dimensions.Tool {
+					t.Errorf("Dimensions = %+v, want both off by default", c.Dimensions)
 				}
 			},
 		},

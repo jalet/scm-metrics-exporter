@@ -41,12 +41,14 @@ const (
 
 // Metric attribute keys.
 const (
-	attrProvider = "provider"
-	attrRepo     = "repo"
-	attrSeverity = "severity"
-	attrCategory = "category"
-	attrResource = "resource"
-	attrSource   = "source"
+	attrProvider  = "provider"
+	attrRepo      = "repo"
+	attrSeverity  = "severity"
+	attrCategory  = "category"
+	attrResource  = "resource"
+	attrSource    = "source"
+	attrEcosystem = "ecosystem"
+	attrTool      = "tool"
 )
 
 // SnapshotSource is the read side of the collector cache that the metrics callback
@@ -65,6 +67,13 @@ type SnapshotSource interface {
 // observable-gauge callback (synchronous instruments only).
 type ScrapeErrorRecorder func(providerName, source string)
 
+// Dimensions selects optional finding labels on scm.security_findings.open. They default
+// off because ecosystem and tool multiply the series cardinality.
+type Dimensions struct {
+	Ecosystem bool
+	Tool      bool
+}
+
 // Setup builds the metric reader from OTEL_METRICS_EXPORTER via autoexport, wires a
 // MeterProvider, registers the instruments and the observing callback, and returns
 // the provider plus the scrape-error recorder. The caller owns shutdown: call
@@ -80,8 +89,8 @@ type ScrapeErrorRecorder func(providerName, source string)
 // resource). It also sets service.name so target_info reports
 // "scm-metrics-exporter" instead of the default "unknown_service:exporter".
 // OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES override the resource defaults.
-// Pass the build version; an empty string is valid.
-func Setup(ctx context.Context, src SnapshotSource, version string) (*sdkmetric.MeterProvider, ScrapeErrorRecorder, error) {
+// Pass the build version; an empty string is valid. dims selects optional finding labels.
+func Setup(ctx context.Context, src SnapshotSource, version string, dims Dimensions) (*sdkmetric.MeterProvider, ScrapeErrorRecorder, error) {
 	reader, err := autoexport.NewMetricReader(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("metrics: create reader: %w", err)
@@ -107,7 +116,7 @@ func Setup(ctx context.Context, src SnapshotSource, version string) (*sdkmetric.
 	)
 	otel.SetMeterProvider(mp)
 
-	record, err := register(mp.Meter(meterName, metric.WithInstrumentationVersion(version)), src)
+	record, err := register(mp.Meter(meterName, metric.WithInstrumentationVersion(version)), src, dims)
 	if err != nil {
 		_ = mp.Shutdown(ctx)
 		return nil, nil, err
@@ -118,7 +127,7 @@ func Setup(ctx context.Context, src SnapshotSource, version string) (*sdkmetric.
 // register creates the four instruments, registers the gauge callback, and returns
 // a recorder for the synchronous counter. It is separated from Setup so tests can
 // drive it with a ManualReader-backed meter.
-func register(meter metric.Meter, src SnapshotSource) (ScrapeErrorRecorder, error) {
+func register(meter metric.Meter, src SnapshotSource, dims Dimensions) (ScrapeErrorRecorder, error) {
 	reviewItems, err := meter.Int64ObservableGauge(metricReviewItemsOpen,
 		metric.WithDescription("Open review items (pull or merge requests) per repository."))
 	if err != nil {
@@ -146,7 +155,7 @@ func register(meter metric.Meter, src SnapshotSource) (ScrapeErrorRecorder, erro
 			if !ok {
 				continue
 			}
-			observeSnapshot(o, name, snap, reviewItems, findings, rateLimit)
+			observeSnapshot(o, name, snap, reviewItems, findings, rateLimit, dims)
 		}
 		return nil
 	}
@@ -164,8 +173,16 @@ func register(meter metric.Meter, src SnapshotSource) (ScrapeErrorRecorder, erro
 	return record, nil
 }
 
-// observeSnapshot emits the three gauges for one provider's snapshot.
-func observeSnapshot(o metric.Observer, name string, snap provider.Snapshot, reviewItems, findings, rateLimit metric.Int64ObservableGauge) {
+// findingKey aggregates findings for the security-findings gauge. ecosystem and tool are
+// left empty unless the corresponding dimension is enabled, so the default output keeps
+// exactly the severity+category label set.
+type findingKey struct {
+	severity, category, ecosystem, tool string
+}
+
+// observeSnapshot emits the three gauges for one provider's snapshot. dims selects the
+// optional ecosystem/tool finding labels.
+func observeSnapshot(o metric.Observer, name string, snap provider.Snapshot, reviewItems, findings, rateLimit metric.Int64ObservableGauge, dims Dimensions) {
 	for _, repo := range snap.Repos {
 		o.ObserveInt64(reviewItems, int64(repo.OpenReviewItems),
 			metric.WithAttributes(
@@ -173,18 +190,31 @@ func observeSnapshot(o metric.Observer, name string, snap provider.Snapshot, rev
 				attribute.String(attrRepo, repo.Name),
 			))
 
-		counts := make(map[[2]string]int64, len(repo.Findings))
+		counts := make(map[findingKey]int64, len(repo.Findings))
 		for _, f := range repo.Findings {
-			counts[[2]string{f.Severity, f.Category}]++
+			k := findingKey{severity: f.Severity, category: f.Category}
+			if dims.Ecosystem {
+				k.ecosystem = f.Ecosystem
+			}
+			if dims.Tool {
+				k.tool = f.Tool
+			}
+			counts[k]++
 		}
 		for key, count := range counts {
-			o.ObserveInt64(findings, count,
-				metric.WithAttributes(
-					attribute.String(attrProvider, name),
-					attribute.String(attrRepo, repo.Name),
-					attribute.String(attrSeverity, key[0]),
-					attribute.String(attrCategory, key[1]),
-				))
+			attrs := []attribute.KeyValue{
+				attribute.String(attrProvider, name),
+				attribute.String(attrRepo, repo.Name),
+				attribute.String(attrSeverity, key.severity),
+				attribute.String(attrCategory, key.category),
+			}
+			if key.ecosystem != "" {
+				attrs = append(attrs, attribute.String(attrEcosystem, key.ecosystem))
+			}
+			if key.tool != "" {
+				attrs = append(attrs, attribute.String(attrTool, key.tool))
+			}
+			o.ObserveInt64(findings, count, metric.WithAttributes(attrs...))
 		}
 	}
 

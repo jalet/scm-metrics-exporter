@@ -104,14 +104,14 @@ func TestSnapshotMergesAndPaginates(t *testing.T) {
 			{Name: "alpha", OpenReviewItems: 3, Findings: []provider.Finding{
 				{Severity: "high", Category: "dependency"},
 				{Severity: "medium", Category: "dependency"}, // MODERATE normalized
-				{Severity: "high", Category: "static_analysis"},
+				{Severity: "high", Category: "static_analysis", Tool: "CodeQL"},
 			}},
 			{Name: "beta", OpenReviewItems: 0, Findings: []provider.Finding{
-				{Severity: "medium", Category: "static_analysis"},
+				{Severity: "medium", Category: "static_analysis", Tool: "CodeQL"},
 			}},
 			{Name: "gamma", OpenReviewItems: 7, Findings: []provider.Finding{
 				{Severity: "critical", Category: "dependency"},
-				{Severity: "critical", Category: "static_analysis"},
+				{Severity: "critical", Category: "static_analysis", Tool: "CodeQL"},
 			}},
 		},
 		RateLimits: []provider.RateLimit{
@@ -313,6 +313,21 @@ func writeTestKey(t *testing.T) string {
 		t.Fatalf("write key: %v", err)
 	}
 	return path
+}
+
+func TestMapGraphQLEcosystem(t *testing.T) {
+	body := `{"data":{"repositoryOwner":{"repositories":{"nodes":[{"name":"a","pullRequests":{"totalCount":0},"vulnerabilityAlerts":{"nodes":[{"securityVulnerability":{"severity":"HIGH","package":{"ecosystem":"NPM"}}}]}}]}}}}`
+	var gr graphqlResponse
+	if err := json.Unmarshal([]byte(body), &gr); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	repos := mapGraphQLRepos(&gr)
+	if len(repos) != 1 || len(repos[0].findings) != 1 {
+		t.Fatalf("repos = %+v, want one repo with one finding", repos)
+	}
+	if f := repos[0].findings[0]; f.Ecosystem != "npm" || f.Category != provider.CategoryDependency {
+		t.Errorf("finding = %+v, want ecosystem=npm (lowercased) category=dependency", f)
+	}
 }
 
 func FuzzMapGraphQL(f *testing.F) {

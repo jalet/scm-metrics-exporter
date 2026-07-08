@@ -24,12 +24,12 @@ func (f fakeSource) Latest(name string) (provider.Snapshot, bool) {
 	return s, ok
 }
 
-func setupReader(t *testing.T, src SnapshotSource) (*sdkmetric.ManualReader, ScrapeErrorRecorder) {
+func setupReader(t *testing.T, src SnapshotSource, dims Dimensions) (*sdkmetric.ManualReader, ScrapeErrorRecorder) {
 	t.Helper()
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
-	record, err := register(mp.Meter("test"), src)
+	record, err := register(mp.Meter("test"), src, dims)
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestObservableGauges(t *testing.T) {
 		},
 	}
 
-	reader, _ := setupReader(t, src)
+	reader, _ := setupReader(t, src, Dimensions{})
 	got := collect(t, reader)
 
 	gh := func(kv ...attribute.KeyValue) attribute.Set {
@@ -102,8 +102,44 @@ func TestObservableGauges(t *testing.T) {
 	metricdatatest.AssertAggregationsEqual(t, wantRate, got[metricRateLimitRemaining], metricdatatest.IgnoreTimestamp())
 }
 
+func TestObservableGaugesFindingDimensions(t *testing.T) {
+	src := fakeSource{
+		names: []string{"github"},
+		snapshots: map[string]provider.Snapshot{
+			"github": {Repos: []provider.RepoMetrics{{
+				Name: "alpha",
+				Findings: []provider.Finding{
+					{Severity: provider.SeverityHigh, Category: provider.CategoryDependency, Ecosystem: "npm"},
+					{Severity: provider.SeverityHigh, Category: provider.CategoryDependency, Ecosystem: "pip"},
+					{Severity: provider.SeverityCritical, Category: provider.CategoryStaticAnalysis, Tool: "CodeQL"},
+				},
+			}}},
+		},
+	}
+	gh := func(kv ...attribute.KeyValue) attribute.Set {
+		return attribute.NewSet(append([]attribute.KeyValue{attribute.String(attrProvider, "github"), attribute.String(attrRepo, "alpha")}, kv...)...)
+	}
+
+	// Dimensions off: aggregate by severity+category only (npm+pip collapse into one series).
+	off, _ := setupReader(t, src, Dimensions{})
+	wantOff := metricdata.Gauge[int64]{DataPoints: []metricdata.DataPoint[int64]{
+		{Attributes: gh(attribute.String(attrSeverity, "high"), attribute.String(attrCategory, "dependency")), Value: 2},
+		{Attributes: gh(attribute.String(attrSeverity, "critical"), attribute.String(attrCategory, "static_analysis")), Value: 1},
+	}}
+	metricdatatest.AssertAggregationsEqual(t, wantOff, collect(t, off)[metricSecurityFindings], metricdatatest.IgnoreTimestamp())
+
+	// Dimensions on: npm and pip split; the code-scanning finding gains a tool label.
+	on, _ := setupReader(t, src, Dimensions{Ecosystem: true, Tool: true})
+	wantOn := metricdata.Gauge[int64]{DataPoints: []metricdata.DataPoint[int64]{
+		{Attributes: gh(attribute.String(attrSeverity, "high"), attribute.String(attrCategory, "dependency"), attribute.String(attrEcosystem, "npm")), Value: 1},
+		{Attributes: gh(attribute.String(attrSeverity, "high"), attribute.String(attrCategory, "dependency"), attribute.String(attrEcosystem, "pip")), Value: 1},
+		{Attributes: gh(attribute.String(attrSeverity, "critical"), attribute.String(attrCategory, "static_analysis"), attribute.String(attrTool, "CodeQL")), Value: 1},
+	}}
+	metricdatatest.AssertAggregationsEqual(t, wantOn, collect(t, on)[metricSecurityFindings], metricdatatest.IgnoreTimestamp())
+}
+
 func TestScrapeErrorCounter(t *testing.T) {
-	reader, record := setupReader(t, fakeSource{})
+	reader, record := setupReader(t, fakeSource{}, Dimensions{})
 
 	record("github", provider.SourceGraphQL)
 	record("github", provider.SourceGraphQL)
@@ -129,7 +165,7 @@ func TestSetupSelectsExporterAndShutsDown(t *testing.T) {
 	// autoexport reader selection, MeterProvider wiring, and shutdown path.
 	t.Setenv("OTEL_METRICS_EXPORTER", "none")
 
-	mp, record, err := Setup(context.Background(), fakeSource{}, "test")
+	mp, record, err := Setup(context.Background(), fakeSource{}, "test", Dimensions{})
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -26,8 +27,17 @@ const (
 type Config struct {
 	Provider     string
 	PollInterval time.Duration
+	Dimensions   FindingDimensions
 	GitHub       GitHubConfig
 	GitLab       GitLabConfig
+}
+
+// FindingDimensions selects optional labels on the security-findings metric. Off by
+// default because they multiply cardinality; enabled via SCM_FINDING_DIMENSIONS
+// (a comma-separated list, for example "ecosystem,tool").
+type FindingDimensions struct {
+	Ecosystem bool
+	Tool      bool
 }
 
 // GitHubConfig holds GitHub provider settings. TargetType selects org (default) or
@@ -62,6 +72,7 @@ func Load(providerName string) (Config, error) {
 	if cfg.PollInterval, err = getenvDuration("POLL_INTERVAL", defaultPollInterval); err != nil {
 		return Config{}, err
 	}
+	cfg.Dimensions = parseDimensions(os.Getenv("SCM_FINDING_DIMENSIONS"))
 
 	switch providerName {
 	case "github":
@@ -163,6 +174,21 @@ func (c GitLabConfig) validate() error {
 		return errors.New("config: GITLAB_TOKEN is required")
 	}
 	return nil
+}
+
+// parseDimensions reads a comma-separated dimension list (for example "ecosystem,tool").
+// Whitespace is trimmed and unknown entries are ignored.
+func parseDimensions(raw string) FindingDimensions {
+	var d FindingDimensions
+	for _, part := range strings.Split(raw, ",") {
+		switch strings.TrimSpace(part) {
+		case "ecosystem":
+			d.Ecosystem = true
+		case "tool":
+			d.Tool = true
+		}
+	}
+	return d
 }
 
 func getenvDefault(key, def string) string {

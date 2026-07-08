@@ -65,7 +65,10 @@ func run(ctx context.Context, providerName string) error {
 
 	coll := collector.New(collector.Entry{Provider: prov, Target: cfg.Target()})
 
-	mp, recordScrapeErr, err := metrics.Setup(ctx, coll, version)
+	mp, recordScrapeErr, err := metrics.Setup(ctx, coll, version, metrics.Dimensions{
+		Ecosystem: cfg.Dimensions.Ecosystem,
+		Tool:      cfg.Dimensions.Tool,
+	})
 	if err != nil {
 		return err
 	}
