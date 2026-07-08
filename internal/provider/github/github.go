@@ -102,23 +102,29 @@ func New(opts Options) (*Provider, error) {
 func (p *Provider) Name() string { return "github" }
 
 // Snapshot polls the target owner's (organization or user) repositories. It merges the
-// GraphQL result (open PRs + Dependabot findings) with the REST code scanning result. A
-// single failing source is recorded in SourceErrors and yields a partial snapshot; only
-// when both sources fail does Snapshot return an error.
+// GraphQL result (open PRs + Dependabot findings) with the REST code scanning and secret
+// scanning results. Each failing source is recorded in SourceErrors and yields a partial
+// snapshot; only when every source fails does Snapshot return an error.
 func (p *Provider) Snapshot(ctx context.Context, target string) (provider.Snapshot, error) {
 	gql, gqlErr := p.collectGraphQL(ctx, target)
 	cs, csErr := p.collectCodeScanning(ctx, target)
+	ss, ssErr := p.collectSecretScanning(ctx, target)
 
-	if gqlErr != nil && csErr != nil {
-		return provider.Snapshot{}, fmt.Errorf("github: all sources failed for %q: %w", target, errors.Join(gqlErr, csErr))
+	if gqlErr != nil && csErr != nil && ssErr != nil {
+		return provider.Snapshot{}, fmt.Errorf("github: all sources failed for %q: %w", target, errors.Join(gqlErr, csErr, ssErr))
 	}
 
-	snap := provider.Snapshot{Repos: mergeRepos(gql.repos, cs.findings)}
+	snap := provider.Snapshot{Repos: mergeRepos(gql.repos, cs.findings, ss.findings)}
 	if gql.rateKnown {
 		snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceGraphQL, Remaining: gql.rateRemaining})
 	}
-	if cs.rateKnown {
-		snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceREST, Remaining: cs.rate})
+	// Code scanning and secret scanning share the REST rate-limit budget; report it once.
+	restRate, restKnown := cs.rate, cs.rateKnown
+	if !restKnown && ss.rateKnown {
+		restRate, restKnown = ss.rate, true
+	}
+	if restKnown {
+		snap.RateLimits = append(snap.RateLimits, provider.RateLimit{Resource: provider.ResourceREST, Remaining: restRate})
 	}
 	if gqlErr != nil {
 		zlog.Warn().Err(gqlErr).Str("provider", "github").Str("source", provider.SourceGraphQL).Str("target", target).
@@ -130,16 +136,22 @@ func (p *Provider) Snapshot(ctx context.Context, target string) (provider.Snapsh
 			Msg("source failed; snapshot is partial")
 		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceREST})
 	}
+	if ssErr != nil {
+		zlog.Warn().Err(ssErr).Str("provider", "github").Str("source", provider.SourceSecretScanning).Str("target", target).
+			Msg("source failed; snapshot is partial")
+		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceSecretScanning})
+	}
 	zlog.Debug().Str("provider", "github").Str("target", target).
 		Int("repos", len(snap.Repos)).Int("rate_limits", len(snap.RateLimits)).
 		Msg("github snapshot assembled")
 	return snap, nil
 }
 
-// mergeRepos combines the GraphQL repositories (open PRs + Dependabot findings) with
-// the code scanning findings (keyed by repo name) into a deterministic slice, sorted
-// by repository name with each repository's findings sorted by category then severity.
-func mergeRepos(gqlRepos []graphqlRepo, csFindings map[string][]provider.Finding) []provider.RepoMetrics {
+// mergeRepos combines the GraphQL repositories (open PRs + Dependabot findings) with any
+// number of finding maps (code scanning, secret scanning), each keyed by repo name, into a
+// deterministic slice sorted by repository name with each repo's findings sorted by
+// category then severity.
+func mergeRepos(gqlRepos []graphqlRepo, findingMaps ...map[string][]provider.Finding) []provider.RepoMetrics {
 	byName := make(map[string]*provider.RepoMetrics)
 	get := func(name string) *provider.RepoMetrics {
 		r, ok := byName[name]
@@ -154,8 +166,10 @@ func mergeRepos(gqlRepos []graphqlRepo, csFindings map[string][]provider.Finding
 		r.OpenReviewItems = gr.openPRs
 		r.Findings = append(r.Findings, gr.findings...)
 	}
-	for name, fs := range csFindings {
-		get(name).Findings = append(get(name).Findings, fs...)
+	for _, fm := range findingMaps {
+		for name, fs := range fm {
+			get(name).Findings = append(get(name).Findings, fs...)
+		}
 	}
 
 	names := make([]string, 0, len(byName))

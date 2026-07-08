@@ -77,7 +77,10 @@ func (p *Provider) collectCodeScanningForOrg(ctx context.Context, org string) (c
 func (p *Provider) collectCodeScanningForUser(ctx context.Context, user string) (codeScanningResult, error) {
 	res := codeScanningResult{findings: make(map[string][]provider.Finding)}
 
-	repos, err := p.listUserRepos(ctx, user, &res)
+	repos, rate, ok, err := p.listUserRepos(ctx, user)
+	if ok {
+		res.rate, res.rateKnown = rate, true
+	}
 	if err != nil {
 		return res, err
 	}
@@ -114,19 +117,18 @@ func (p *Provider) collectCodeScanningForUser(ctx context.Context, user string) 
 	return res, nil
 }
 
-// listUserRepos returns the user's owned repository names, updating the rate reading.
-func (p *Provider) listUserRepos(ctx context.Context, user string, res *codeScanningResult) ([]string, error) {
+// listUserRepos returns the user's owned repository names plus the latest REST rate
+// reading. Shared by the per-repo code-scanning and secret-scanning collectors.
+func (p *Provider) listUserRepos(ctx context.Context, user string) (repos []string, rate int64, rateKnown bool, err error) {
 	opts := &gh.RepositoryListByUserOptions{Type: "owner"}
 	opts.PerPage = 100
-	var repos []string
 	for page := 0; page < p.maxPages; page++ {
-		rs, resp, err := p.rest.Repositories.ListByUser(ctx, user, opts)
+		rs, resp, e := p.rest.Repositories.ListByUser(ctx, user, opts)
 		if resp != nil {
-			res.rate = int64(resp.Rate.Remaining)
-			res.rateKnown = true
+			rate, rateKnown = int64(resp.Rate.Remaining), true
 		}
-		if err != nil {
-			return nil, err
+		if e != nil {
+			return nil, rate, rateKnown, e
 		}
 		for _, r := range rs {
 			if n := r.GetName(); n != "" {
@@ -134,12 +136,12 @@ func (p *Provider) listUserRepos(ctx context.Context, user string, res *codeScan
 			}
 		}
 		if resp == nil || resp.NextPage == 0 {
-			return repos, nil
+			return repos, rate, rateKnown, nil
 		}
 		opts.Page = resp.NextPage
 	}
 	zlog.Warn().Str("owner", user).Int("maxPages", p.maxPages).Msg("github user repo listing cap reached")
-	return repos, nil
+	return repos, rate, rateKnown, nil
 }
 
 func codeScanningFinding(a *gh.Alert) provider.Finding {
