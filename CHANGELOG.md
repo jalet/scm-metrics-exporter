@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.3.0...v0.4.0) (2026-07-08)
+
+
+### Features
+
+* discovery + dispatched per-repo OTLP collection ([#16](https://github.com/jalet/scm-metrics-exporter/issues/16)) ([1050917](https://github.com/jalet/scm-metrics-exporter/commit/10509173fac112c838172c5c70961b64ed4030e7))
+* expose repository security posture as scm_repo_info (GitHub + GitLab) ([#15](https://github.com/jalet/scm-metrics-exporter/issues/15)) ([4b6ed24](https://github.com/jalet/scm-metrics-exporter/commit/4b6ed24e3213283c567199b016e2dfc77287385a))
+* **github:** add secret-scanning findings (category=secret) ([#12](https://github.com/jalet/scm-metrics-exporter/issues/12)) ([cbdf746](https://github.com/jalet/scm-metrics-exporter/commit/cbdf746516127ccbb3f59910cd75ca1648b7400b))
+* **operator:** always-on validating admission webhook (cert-manager) ([#14](https://github.com/jalet/scm-metrics-exporter/issues/14)) ([9049005](https://github.com/jalet/scm-metrics-exporter/commit/9049005096ab1f63590aa0e1b090751fd6e2afcb))
+* optional finding dimensions (ecosystem, tool) ([#13](https://github.com/jalet/scm-metrics-exporter/issues/13)) ([6211036](https://github.com/jalet/scm-metrics-exporter/commit/621103618a41384867be7344b9ada8b486164894))
+* support user (non-org) targets for GitHub and GitLab ([#10](https://github.com/jalet/scm-metrics-exporter/issues/10)) ([7e7d905](https://github.com/jalet/scm-metrics-exporter/commit/7e7d9056fae3891864e32733cd64de2671e9634e))
+
 ## [0.3.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.2.0...v0.3.0) (2026-07-08)
 
 
