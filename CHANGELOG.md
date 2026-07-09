@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.4.3...v0.5.0) (2026-07-09)
+
+
+### Features
+
+* alert lifecycle metrics and Valkey-backed MTTR histogram ([#28](https://github.com/jalet/scm-metrics-exporter/issues/28)) ([a9b5653](https://github.com/jalet/scm-metrics-exporter/commit/a9b56530ba3f721ecfbb6d4238059c558b9323bc))
+
 ## [0.4.3](https://github.com/jalet/scm-metrics-exporter/compare/v0.4.2...v0.4.3) (2026-07-09)
 
 
