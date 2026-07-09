@@ -1,0 +1,95 @@
+{{/*
+Optional bundled Valkey for lifecycle dedup state (scm_finding_remediation_seconds /
+scm_findings_by_state). Off by default: this is a minimal, single-replica, unauthenticated,
+no-HA, no-backup StatefulSet meant for evaluation and small deployments. Production
+deployments should bring their own properly operated Valkey/Redis and point each CR's
+spec.valkey.endpoint at it instead of setting valkey.deploy: true.
+*/}}
+
+{{/*
+Valkey-specific labels: scm-metrics-exporter.selectorLabels hardcodes
+app.kubernetes.io/component: operator, so it cannot be reused here without producing a
+duplicate (and wrong) component label.
+*/}}
+{{- define "scm-metrics-exporter.valkeySelectorLabels" -}}
+app.kubernetes.io/name: {{ include "scm-metrics-exporter.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: valkey
+{{- end -}}
+
+{{- define "scm-metrics-exporter.valkeyLabels" -}}
+helm.sh/chart: {{ include "scm-metrics-exporter.chart" . }}
+{{ include "scm-metrics-exporter.valkeySelectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/part-of: scm-metrics-exporter
+{{- end -}}
+
+{{- if .Values.valkey.deploy }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "scm-metrics-exporter.valkeyLabels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "scm-metrics-exporter.valkeySelectorLabels" . | nindent 4 }}
+  ports:
+    - name: valkey
+      port: 6379
+      targetPort: valkey
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: valkey
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "scm-metrics-exporter.valkeyLabels" . | nindent 4 }}
+spec:
+  serviceName: valkey
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "scm-metrics-exporter.valkeySelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "scm-metrics-exporter.valkeySelectorLabels" . | nindent 8 }}
+    spec:
+      # fsGroup makes the PVC group-owned by the runtime group, so the non-root container
+      # (runAsUser) can write to /data; mirrors internal/controller/render.go's
+      # restrictedPodSecurityContext used for the collection Jobs.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: valkey
+          image: {{ .Values.valkey.image }}
+          ports:
+            - name: valkey
+              containerPort: 6379
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "scm-metrics-exporter.valkeyLabels" . | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.valkey.storage }}
+{{- end }}

@@ -148,3 +148,29 @@ func TestLoad(t *testing.T) {
 		})
 	}
 }
+
+func TestLifecycleConfig(t *testing.T) {
+	t.Setenv("GITHUB_ORG", "acme")
+	t.Setenv("GITHUB_TOKEN", "t")
+	t.Setenv("SCM_COLLECT_LIFECYCLE", "true")
+	t.Setenv("SCM_RESOLUTION_WINDOW", "720h")
+	t.Setenv("VALKEY_ADDR", "valkey:6379")
+
+	cfg, err := Load("github")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Lifecycle.Enabled || cfg.Lifecycle.ResolutionWindow != 720*time.Hour || cfg.Lifecycle.ValkeyAddr != "valkey:6379" {
+		t.Fatalf("lifecycle config wrong: %+v", cfg.Lifecycle)
+	}
+}
+
+func TestLifecycleRequiresValkeyAddr(t *testing.T) {
+	t.Setenv("GITHUB_ORG", "acme")
+	t.Setenv("GITHUB_TOKEN", "t")
+	t.Setenv("SCM_COLLECT_LIFECYCLE", "true")
+	// no VALKEY_ADDR
+	if _, err := Load("github"); err == nil {
+		t.Fatal("expected error when lifecycle enabled without VALKEY_ADDR")
+	}
+}

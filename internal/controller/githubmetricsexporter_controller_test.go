@@ -171,6 +171,42 @@ func TestOTLPEndpointRequired(t *testing.T) {
 	}
 }
 
+func TestCollectLifecycleRequiresValkeyCELValidation(t *testing.T) {
+	ctx := context.Background()
+	ns := createNamespace(t)
+
+	bad := &scmv1alpha1.GitHubMetricsExporter{
+		ObjectMeta: metav1.ObjectMeta{Name: "gh-lifecycle-novalkey", Namespace: ns},
+		Spec: scmv1alpha1.GitHubMetricsExporterSpec{
+			ExporterSpec: func() scmv1alpha1.ExporterSpec {
+				s := baseSpec("c")
+				s.CollectLifecycle = true // no Valkey
+				return s
+			}(),
+			Org: "acme", AuthMode: "token", TokenKey: "token",
+		},
+	}
+	if err := k8sClient.Create(ctx, bad); err == nil {
+		t.Fatal("create CR with collectLifecycle=true and no valkey: got nil error, want CEL rejection")
+	}
+
+	good := &scmv1alpha1.GitHubMetricsExporter{
+		ObjectMeta: metav1.ObjectMeta{Name: "gh-lifecycle-valkey", Namespace: ns},
+		Spec: scmv1alpha1.GitHubMetricsExporterSpec{
+			ExporterSpec: func() scmv1alpha1.ExporterSpec {
+				s := baseSpec("c")
+				s.CollectLifecycle = true
+				s.Valkey = &scmv1alpha1.ValkeyConfig{Endpoint: "valkey.observability:6379"}
+				return s
+			}(),
+			Org: "acme", AuthMode: "token", TokenKey: "token",
+		},
+	}
+	if err := k8sClient.Create(ctx, good); err != nil {
+		t.Fatalf("create CR with collectLifecycle=true and valkey.endpoint set: %v", err)
+	}
+}
+
 func TestReconcileDispatchesOneJobPerRepo(t *testing.T) {
 	ctx := context.Background()
 	ns := createNamespace(t)

@@ -138,6 +138,15 @@ func (p *Provider) SnapshotRepo(ctx context.Context, _, repo string) (provider.S
 			snap.Repos[0].WorkflowRuns = stats
 		}
 	}
+	// Resolved-vulnerability collection is opt-in and supplementary: never fatal, a
+	// failure is recorded.
+	if p.collectLifecycle {
+		if resolved, lcErr := p.collectResolvedFindings(ctx, repo); lcErr != nil {
+			snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceLifecycle})
+		} else if len(snap.Repos) > 0 {
+			snap.Repos[0].ResolvedFindings = resolved
+		}
+	}
 	return snap, nil
 }
 

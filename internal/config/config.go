@@ -12,6 +12,7 @@ import (
 )
 
 const defaultPollInterval = 5 * time.Minute
+const defaultResolutionWindow = 90 * 24 * time.Hour
 
 // Target types. GitHub polls an organization (default) or a user; GitLab polls a
 // group (default) or a user. The type selects which target field is required and
@@ -30,6 +31,15 @@ type Config struct {
 	Dimensions   FindingDimensions
 	GitHub       GitHubConfig
 	GitLab       GitLabConfig
+	Lifecycle    LifecycleConfig
+}
+
+// LifecycleConfig configures resolved-alert (MTTR + state) collection and its Valkey store.
+type LifecycleConfig struct {
+	Enabled          bool
+	ResolutionWindow time.Duration
+	ValkeyAddr       string
+	ValkeyPassword   string
 }
 
 // FindingDimensions selects optional labels on the security-findings metric. Off by
@@ -77,6 +87,16 @@ func Load(providerName string) (Config, error) {
 		return Config{}, err
 	}
 	cfg.Dimensions = parseDimensions(os.Getenv("SCM_FINDING_DIMENSIONS"))
+
+	cfg.Lifecycle.Enabled = os.Getenv("SCM_COLLECT_LIFECYCLE") == "true"
+	if cfg.Lifecycle.ResolutionWindow, err = getenvDuration("SCM_RESOLUTION_WINDOW", defaultResolutionWindow); err != nil {
+		return Config{}, err
+	}
+	cfg.Lifecycle.ValkeyAddr = os.Getenv("VALKEY_ADDR")
+	cfg.Lifecycle.ValkeyPassword = os.Getenv("VALKEY_PASSWORD")
+	if cfg.Lifecycle.Enabled && cfg.Lifecycle.ValkeyAddr == "" {
+		return Config{}, errors.New("config: SCM_COLLECT_LIFECYCLE=true requires VALKEY_ADDR")
+	}
 
 	switch providerName {
 	case "github":

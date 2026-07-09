@@ -64,6 +64,41 @@ type ExporterSpec struct {
 	// CredentialsSecret names the Secret in the CR's namespace holding the provider
 	// credentials referenced by the provider-specific key fields.
 	CredentialsSecret corev1.LocalObjectReference `json:"credentialsSecret"`
+
+	// CollectLifecycle enables resolved-alert collection: the remediation-time histogram
+	// (scm_finding_remediation_seconds) and the finding-state gauge (scm_findings_by_state).
+	// Requires Valkey. Off by default.
+	// +kubebuilder:default=false
+	// +optional
+	CollectLifecycle bool `json:"collectLifecycle,omitempty"`
+
+	// ResolutionWindow bounds how far back resolved alerts are collected and is the
+	// deduplication TTL. Used when CollectLifecycle is true.
+	// +kubebuilder:default="2160h"
+	// +optional
+	ResolutionWindow metav1.Duration `json:"resolutionWindow,omitempty"`
+
+	// Valkey configures the store backing the remediation histogram. Required when
+	// CollectLifecycle is true.
+	// +optional
+	Valkey *ValkeyConfig `json:"valkey,omitempty"`
+}
+
+// ValkeyConfig points the collection Jobs at a Valkey endpoint for lifecycle dedup state.
+type ValkeyConfig struct {
+	// Endpoint is the Valkey host:port (for example "valkey.observability:6379").
+	// +kubebuilder:validation:MinLength=1
+	Endpoint string `json:"endpoint"`
+
+	// SecretRef names a Secret in the CR namespace holding the Valkey password under
+	// PasswordKey. Omit for a passwordless Valkey.
+	// +optional
+	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
+
+	// PasswordKey is the Secret key holding the Valkey password (default "password").
+	// +kubebuilder:default="password"
+	// +optional
+	PasswordKey string `json:"passwordKey,omitempty"`
 }
 
 // ExportConfig controls the OpenTelemetry OTLP export used by the collection Jobs.

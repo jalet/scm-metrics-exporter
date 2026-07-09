@@ -80,6 +80,15 @@ metrics:
   bindAddress: ":8080"
   port: 8080
 
+valkey:
+  # deploy a bundled single-replica Valkey for lifecycle dedup state; set false (the
+  # default) to bring your own and reference it via each CR's spec.valkey.endpoint. The
+  # bundled StatefulSet is single-replica with no HA or backups, so production
+  # deployments should prefer BYO (a properly operated Valkey/Redis) over this option.
+  deploy: false
+  image: valkey/valkey:8-alpine
+  storage: 1Gi
+
 # Optional demo CR; off by default so `helm install` does not spin up collection Jobs.
 sampleCR:
   enabled: false

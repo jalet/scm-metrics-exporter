@@ -53,6 +53,10 @@ type Options struct {
 	CollectWorkflows bool
 	// WorkflowLookback bounds how far back workflow runs are counted (default 7 days).
 	WorkflowLookback time.Duration
+	// CollectLifecycle enables resolved-alert collection (MTTR + state) in SnapshotRepo.
+	CollectLifecycle bool
+	// ResolutionWindow bounds how far back resolved alerts are collected (default 90 days).
+	ResolutionWindow time.Duration
 	CodeScanningTool string // SARIF tool filter; empty counts all tools
 	BaseURL          string // REST base URL override (must accept a trailing slash)
 	GraphQLURL       string // GraphQL endpoint override
@@ -68,10 +72,15 @@ type Provider struct {
 	maxPages         int
 	collectWorkflows bool
 	workflowLookback time.Duration
+	collectLifecycle bool
+	resolutionWindow time.Duration
 }
 
 // defaultWorkflowLookback bounds recent workflow-run collection when unset.
 const defaultWorkflowLookback = 7 * 24 * time.Hour
+
+// defaultResolutionWindow bounds resolved-alert collection when unset.
+const defaultResolutionWindow = 90 * 24 * time.Hour
 
 var (
 	_ provider.Provider        = (*Provider)(nil)
@@ -111,6 +120,11 @@ func New(opts Options) (*Provider, error) {
 		lookback = defaultWorkflowLookback
 	}
 
+	window := opts.ResolutionWindow
+	if window <= 0 {
+		window = defaultResolutionWindow
+	}
+
 	return &Provider{
 		rest:             rest,
 		graphql:          &graphqlClient{httpClient: httpClient, endpoint: endpoint},
@@ -119,6 +133,8 @@ func New(opts Options) (*Provider, error) {
 		maxPages:         defaultMaxPages,
 		collectWorkflows: opts.CollectWorkflows,
 		workflowLookback: lookback,
+		collectLifecycle: opts.CollectLifecycle,
+		resolutionWindow: window,
 	}, nil
 }
 
@@ -228,6 +244,16 @@ func (p *Provider) SnapshotRepo(ctx context.Context, owner, repo string) (provid
 			snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceWorkflows})
 		} else if len(snap.Repos) > 0 {
 			snap.Repos[0].WorkflowRuns = stats
+		}
+	}
+	// Lifecycle (resolved-alert) collection is opt-in and supplementary: never fatal.
+	if p.collectLifecycle {
+		if resolved, lcErr := p.collectResolvedFindings(ctx, owner, repo); lcErr != nil {
+			zlog.Warn().Err(lcErr).Str("provider", "github").Str("source", provider.SourceLifecycle).Str("repo", owner+"/"+repo).
+				Msg("source failed; snapshot is partial")
+			snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceLifecycle})
+		} else if len(snap.Repos) > 0 {
+			snap.Repos[0].ResolvedFindings = resolved
 		}
 	}
 	zlog.Debug().Str("provider", "github").Str("repo", owner+"/"+repo).

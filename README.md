@@ -15,6 +15,7 @@ credentials and rate budgets.
 ## Contents
 
 - [Metrics](#metrics)
+- [Remediation time (MTTR)](#remediation-time-mttr)
 - [Components](#components)
 - [Install the operator (Helm)](#install-the-operator-helm)
 - [Custom resource examples](#custom-resource-examples)
@@ -34,6 +35,10 @@ credentials and rate budgets.
 | `scm.exporter.scrape_errors` | counter | provider, source | `scm_exporter_scrape_errors_total` |
 | `scm.repo.info` | gauge | provider, repo, visibility, archived, branch_protected, dependabot_enabled | `scm_repo_info` |
 | `scm.workflow_runs.recent` | gauge | provider, repo, workflow, conclusion | `scm_workflow_runs_recent` |
+| `scm.finding_remediation_seconds.bucket` | monotonic counter (histogram bucket) | provider, repo, category, resolution, le | `scm_finding_remediation_seconds_bucket` |
+| `scm.finding_remediation_seconds.sum` | monotonic counter | provider, repo, category, resolution | `scm_finding_remediation_seconds_sum` |
+| `scm.finding_remediation_seconds.count` | monotonic counter | provider, repo, category, resolution | `scm_finding_remediation_seconds_count` |
+| `scm.findings.by_state` | gauge | provider, repo, category, state | `scm_findings_by_state` |
 
 `severity` is one of `critical`, `high`, `medium`, `low`, or `unknown` (GitHub
 secret-scanning alerts carry no severity). `category` is one of `dependency`,
@@ -68,6 +73,59 @@ cycle: compute a failure ratio in the query, e.g. `failure / (success+failure)`.
 
 Example: repos in an org missing branch protection --
 `scm_repo_info{branch_protected="false"}`.
+
+The Prometheus names above are the mapping this project's own OTLP-to-Prometheus path
+produces (dots become underscores; `bucket`/`sum`/`count` are the histogram suffixes, not
+the `_total` suffix a plain monotonic counter gets). A different OTLP collector or exporter
+configuration may map instrument names differently -- verify the names actually emitted at
+your collector before wiring alerts or dashboards against them.
+
+## Remediation time (MTTR)
+
+Opt-in via `spec.collectLifecycle: true` (requires Valkey, see [Configuration](#configuration)
+and the [runbook](docs/runbook.md)). Each collection Job additionally fetches **resolved**
+findings (state fixed/dismissed/resolved) within `spec.resolutionWindow` (default `2160h` /
+90d), deduplicates them by provider-stable alert id in Valkey, and emits cumulative bucket
+counters for `scm_finding_remediation_seconds` -- a true Prometheus histogram usable with
+`histogram_quantile()` over any PromQL window, not a rolling-window gauge.
+
+Every resolved finding carries a normalized `resolution` label with exactly three values,
+so a query decides what "closed" means instead of lumping every dismissal into remediation
+(which would game MTTR and hide accepted-risk backlog):
+
+- `fixed` -- actually remediated: code changed, or a secret revoked/rotated.
+- `dismissed_not_a_risk` -- false positive, used in tests, inaccurate, or not applicable.
+- `dismissed_accepted_risk` -- won't-fix, tolerable risk, no bandwidth, or otherwise
+  accepted. Any provider dismissal reason this project does not recognize also lands here
+  (conservative default: treat the unknown case as still-a-risk).
+
+Three views follow from the label:
+
+- **Security KPI (MTTR)** -- `resolution="fixed"` only.
+- **"No longer a real risk"** -- `resolution=~"fixed|dismissed_not_a_risk"`.
+- **Accepted-risk backlog** -- `resolution="dismissed_accepted_risk"`.
+
+```promql
+histogram_quantile(0.9,
+  sum(rate(scm_finding_remediation_seconds_bucket{resolution="fixed"}[30d])) by (le))
+```
+
+`scm_findings_by_state` is a point-in-time gauge (not deduplicated) observed from the same
+snapshot each cycle: open findings contribute `state="open"`; resolved-in-window findings
+contribute their provider-reported lifecycle state (`fixed`, `dismissed`, `auto_dismissed`,
+or `resolved`) -- a finer-grained, provider-facing view than the three-way `resolution`
+label on the histogram.
+
+**Failure modes:** if Valkey is unreachable, the histogram is skipped, a
+`scm_exporter_scrape_errors_total{source="lifecycle"}` is recorded, and every other metric
+(open findings, posture, workflow runs) still flows -- lifecycle collection failure is never
+fatal to a collection Job. If Valkey loses its data, the cumulative counters reset to zero
+and climb again as findings are re-counted; this is a benign counter reset that `rate()` and
+`increase()` already tolerate.
+
+**Not included in this epic (deferred):** a `severity` label on the histogram (would
+multiply series cardinality on top of `provider,repo,category,resolution`), and a
+`scm_finding_open_age_seconds` gauge for open (not yet resolved) findings.
 
 ## Components
 
@@ -231,6 +289,10 @@ The exporter is configured entirely by environment variables.
 | `GITHUB_APP_ID` / `GITHUB_APP_INSTALLATION_ID` / `GITHUB_APP_PRIVATE_KEY_PATH` | | GitHub App auth. |
 | `GITHUB_CODE_SCANNING_TOOL` | (all tools) | Optional SARIF tool filter (for example `CodeQL`). |
 | `SCM_FINDING_DIMENSIONS` | (none) | Comma list of optional finding labels: `ecosystem`, `tool`. Off by default (raises cardinality). |
+| `SCM_COLLECT_LIFECYCLE` | `false` | Enable resolved-finding collection: `scm_finding_remediation_seconds` and `scm_findings_by_state`. Requires `VALKEY_ADDR`. |
+| `SCM_RESOLUTION_WINDOW` | `2160h` | How far back resolved findings are collected, and the Valkey dedup TTL. Used when `SCM_COLLECT_LIFECYCLE=true`. |
+| `VALKEY_ADDR` | | Valkey `host:port` backing the remediation histogram (required when `SCM_COLLECT_LIFECYCLE=true`). |
+| `VALKEY_PASSWORD` | (none) | Valkey auth password. Omit for a passwordless Valkey. |
 | `POLL_INTERVAL` | `5m` | Poll cadence for the full-target (non-`--once`) mode. |
 | `OTEL_METRICS_EXPORTER` | `otlp` | `otlp` or `console`. The Prometheus pull backend has been removed. |
 | `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | | OTLP push target (required in `otlp` mode). |
@@ -281,11 +343,16 @@ After changing API types or RBAC markers, run `mise run generate manifests` and
   check the Job logs (`kubectl logs job/<name>`).
 - **CR `Ready=False` / `DiscoveryFailed`** -- the operator could not list repositories:
   check the credentials and that the token/App can see the target's repos/projects.
+- **`scm_exporter_scrape_errors_total{source="lifecycle"}` increasing** -- Valkey is
+  unreachable from the collection Jobs (`collectLifecycle` is on). The histogram is skipped
+  but every other metric still flows; fix reachability. See
+  [Enable remediation-time (MTTR) metrics](docs/how-to-enable-mttr.md#troubleshooting).
 
 ## Documentation
 
 - [CRD reference](docs/crd-reference.md) -- every spec field, default, and validation rule.
-- [Operator runbook](docs/runbook.md) -- deploy, rotate credentials, upgrade CRDs, cut a release.
+- [Enable remediation-time (MTTR) metrics](docs/how-to-enable-mttr.md) -- provision Valkey, turn on `collectLifecycle`, verify, and query MTTR.
+- [Operator runbook](docs/runbook.md) -- deploy, rotate credentials, Valkey operations, upgrade CRDs, cut a release.
 
 ## License
 

@@ -18,10 +18,12 @@ import (
 
 	"github.com/jalet/scm-metrics-exporter/internal/collector"
 	"github.com/jalet/scm-metrics-exporter/internal/config"
+	"github.com/jalet/scm-metrics-exporter/internal/lifecycle"
 	"github.com/jalet/scm-metrics-exporter/internal/metrics"
 	"github.com/jalet/scm-metrics-exporter/internal/provider"
 	providergithub "github.com/jalet/scm-metrics-exporter/internal/provider/github"
 	providergitlab "github.com/jalet/scm-metrics-exporter/internal/provider/gitlab"
+	"github.com/jalet/scm-metrics-exporter/internal/store"
 )
 
 // Build metadata, populated via -ldflags "-X main.version=...".
@@ -67,12 +69,27 @@ func run(ctx context.Context, providerName string, once bool, repo string) error
 
 	coll := collector.New(collector.Entry{Provider: prov, Target: cfg.Target(), Repo: repo})
 
+	lcStore, connected := openRemediationStore(cfg.Lifecycle)
+	if lcStore != nil {
+		defer func() { _ = lcStore.Close() }()
+	}
+	var remediation metrics.RemediationReader
+	if lcStore != nil {
+		remediation = lcStore
+	}
+
 	mp, recordScrapeErr, err := metrics.Setup(ctx, coll, version, metrics.Dimensions{
 		Ecosystem: cfg.Dimensions.Ecosystem,
 		Tool:      cfg.Dimensions.Tool,
-	})
+	}, remediation)
 	if err != nil {
 		return err
+	}
+	if cfg.Lifecycle.Enabled && !connected {
+		// Valkey was configured but unreachable: never fatal to the Job. The remediation
+		// histogram is skipped this run, but every other signal still pushes; record one
+		// lifecycle scrape error so the gap is visible (scm_exporter_scrape_errors{source="lifecycle"}).
+		recordScrapeErr(prov.Name(), provider.SourceLifecycle)
 	}
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -95,12 +112,39 @@ func run(ctx context.Context, providerName string, once bool, repo string) error
 		// snapshot over OTLP and stops the reader (a single export -- no separate
 		// ForceFlush). A hard whole-provider failure returns an error (exit 1); a partial
 		// snapshot (recorded scrape errors) returns nil (exit 0).
-		return coll.PollOnce(ctx, recordScrapeErr)
+		perr := coll.PollOnce(ctx, recordScrapeErr)
+		if lcStore != nil {
+			if snap, ok := coll.Latest(prov.Name()); ok {
+				if rerr := lifecycle.Record(ctx, lcStore, prov.Name(), snap, cfg.Lifecycle.ResolutionWindow); rerr != nil {
+					zlog.Warn().Err(rerr).Msg("recording resolved findings")
+					recordScrapeErr(prov.Name(), provider.SourceLifecycle)
+				}
+			}
+		}
+		return perr
 	}
 
 	// Blocks until a signal cancels ctx; the periodic OTLP/console reader is stopped by
 	// the deferred mp.Shutdown.
 	return coll.Run(ctx, cfg.PollInterval, recordScrapeErr)
+}
+
+// openRemediationStore attempts to open the lifecycle store when enabled. It returns the
+// store (nil when disabled or unreachable) and connected=false when lifecycle is enabled
+// but the store could not be reached -- a non-fatal condition the caller records as a
+// lifecycle scrape error. It never returns an error for a reachability failure: config.Load
+// already rejects a lifecycle-enabled config with no ValkeyAddr as a fatal misconfiguration,
+// so by the time this runs, a failure here is purely a runtime connectivity problem.
+func openRemediationStore(cfg config.LifecycleConfig) (st *store.Valkey, connected bool) {
+	if !cfg.Enabled {
+		return nil, false
+	}
+	s, err := store.NewValkey(store.Options{Addr: cfg.ValkeyAddr, Password: cfg.ValkeyPassword})
+	if err != nil {
+		zlog.Warn().Err(err).Str("addr", cfg.ValkeyAddr).Msg("lifecycle: Valkey unreachable; remediation histogram disabled for this run")
+		return nil, false
+	}
+	return s, true
 }
 
 func buildProvider(cfg config.Config, repo string) (provider.Provider, error) {
@@ -116,6 +160,8 @@ func buildProvider(cfg config.Config, repo string) (provider.Provider, error) {
 			CodeScanningTool:  cfg.GitHub.CodeScanningTool,
 			CollectWorkflows:  cfg.GitHub.CollectWorkflows,
 			WorkflowLookback:  cfg.GitHub.WorkflowLookback,
+			CollectLifecycle:  cfg.Lifecycle.Enabled,
+			ResolutionWindow:  cfg.Lifecycle.ResolutionWindow,
 		})
 		if err != nil {
 			return nil, err
@@ -128,6 +174,8 @@ func buildProvider(cfg config.Config, repo string) (provider.Provider, error) {
 			BaseURL:          cfg.GitLab.BaseURL,
 			CollectWorkflows: cfg.GitLab.CollectWorkflows,
 			WorkflowLookback: cfg.GitLab.WorkflowLookback,
+			CollectLifecycle: cfg.Lifecycle.Enabled,
+			ResolutionWindow: cfg.Lifecycle.ResolutionWindow,
 		})
 		if err != nil {
 			return nil, err

@@ -3,11 +3,13 @@ module github.com/jalet/scm-metrics-exporter
 go 1.26.5
 
 require (
+	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/bradleyfalzon/ghinstallation/v2 v2.19.0
 	github.com/failsafe-go/failsafe-go v0.9.6
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v88 v88.0.0
 	github.com/google/go-github/v89 v89.0.0
+	github.com/redis/go-redis/v9 v9.21.0
 	github.com/rs/zerolog v1.35.1
 	go.opentelemetry.io/contrib/exporters/autoexport v0.69.0
 	go.opentelemetry.io/otel v1.44.0
@@ -60,6 +62,7 @@ require (
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/bridges/prometheus v0.69.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc v0.20.0 // indirect
@@ -77,6 +80,7 @@ require (
 	go.opentelemetry.io/otel/sdk/log v0.20.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect

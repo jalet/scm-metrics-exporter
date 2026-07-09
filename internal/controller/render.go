@@ -126,6 +126,22 @@ func commonExporterEnv(spec scmv1alpha1.ExporterSpec) []corev1.EnvVar {
 	if len(spec.FindingDimensions) > 0 {
 		env = append(env, corev1.EnvVar{Name: "SCM_FINDING_DIMENSIONS", Value: strings.Join(spec.FindingDimensions, ",")})
 	}
+	if spec.CollectLifecycle {
+		env = append(env,
+			corev1.EnvVar{Name: "SCM_COLLECT_LIFECYCLE", Value: "true"},
+			corev1.EnvVar{Name: "SCM_RESOLUTION_WINDOW", Value: spec.ResolutionWindow.Duration.String()},
+		)
+		if spec.Valkey != nil {
+			env = append(env, corev1.EnvVar{Name: "VALKEY_ADDR", Value: spec.Valkey.Endpoint})
+			if spec.Valkey.SecretRef != nil {
+				key := spec.Valkey.PasswordKey
+				if key == "" {
+					key = "password"
+				}
+				env = append(env, corev1.EnvVar{Name: "VALKEY_PASSWORD", ValueFrom: secretKeyRef(*spec.Valkey.SecretRef, key)})
+			}
+		}
+	}
 	return env
 }
 

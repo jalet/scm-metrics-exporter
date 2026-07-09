@@ -9,6 +9,7 @@ import (
 //
 // +kubebuilder:validation:XValidation:rule="self.targetType != 'group' || (has(self.group) && size(self.group) > 0)",message="targetType 'group' requires group"
 // +kubebuilder:validation:XValidation:rule="self.targetType != 'user' || (has(self.user) && size(self.user) > 0)",message="targetType 'user' requires user"
+// +kubebuilder:validation:XValidation:rule="!self.collectLifecycle || has(self.valkey)",message="valkey is required when collectLifecycle is true"
 type GitLabMetricsExporterSpec struct {
 	ExporterSpec `json:",inline"`
 
