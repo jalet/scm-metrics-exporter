@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3](https://github.com/jalet/scm-metrics-exporter/compare/v0.4.2...v0.4.3) (2026-07-09)
+
+
+### Bug Fixes
+
+* **release:** don't fail the release on the code-scanning SARIF upload ([#26](https://github.com/jalet/scm-metrics-exporter/issues/26)) ([84e0731](https://github.com/jalet/scm-metrics-exporter/commit/84e0731375bafa1f960546d78975f8e3ff464478))
+
 ## [0.4.2](https://github.com/jalet/scm-metrics-exporter/compare/v0.4.1...v0.4.2) (2026-07-09)
 
 
