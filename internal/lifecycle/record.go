@@ -18,8 +18,12 @@ type RecordStore interface {
 
 // Record walks a snapshot's resolved findings and records each into the store under its
 // remediation scope. A finding with a zero or non-positive duration, or an empty id, is
-// skipped. Store errors are joined and returned; a returned error is non-fatal to the caller
-// (recorded as a lifecycle source error).
+// skipped. A duration longer than the resolution window is also skipped: it cannot be a
+// real in-window observation and signals a bad or zero-value timestamp (for example a
+// CreatedAt that failed to parse and fell back to the zero time), which would otherwise
+// inflate the +Inf overflow bucket as a bogus multi-decade remediation. Store errors are
+// joined and returned; a returned error is non-fatal to the caller (recorded as a lifecycle
+// source error).
 func Record(ctx context.Context, st RecordStore, providerName string, snap provider.Snapshot, window time.Duration) error {
 	var errs []error
 	for _, repo := range snap.Repos {
@@ -28,7 +32,7 @@ func Record(ctx context.Context, st RecordStore, providerName string, snap provi
 				continue
 			}
 			duration := rf.ResolvedAt.Sub(rf.CreatedAt)
-			if duration <= 0 {
+			if duration <= 0 || duration > window {
 				continue
 			}
 			scope := provider.RemediationScope(providerName, repo.Name, rf.Category, rf.Resolution)

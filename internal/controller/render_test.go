@@ -35,3 +35,39 @@ func TestGithubEnvLifecycle(t *testing.T) {
 		t.Fatalf("VALKEY_ADDR = %+v, ok=%v", e, ok)
 	}
 }
+
+// TestGithubEnvLifecycleValkeySecretRef covers the VALKEY_PASSWORD secretRef render path: a
+// Valkey block with a SecretRef and no PasswordKey set must render VALKEY_PASSWORD sourced
+// from that Secret, defaulting the key to "password".
+func TestGithubEnvLifecycleValkeySecretRef(t *testing.T) {
+	cr := &scmv1alpha1.GitHubMetricsExporter{
+		ObjectMeta: metav1.ObjectMeta{Name: "gh", Namespace: "ns"},
+		Spec: scmv1alpha1.GitHubMetricsExporterSpec{
+			ExporterSpec: scmv1alpha1.ExporterSpec{
+				Export:            scmv1alpha1.ExportConfig{OTLPEndpoint: "http://otel:4318"},
+				CredentialsSecret: corev1.LocalObjectReference{Name: "creds"},
+				CollectLifecycle:  true,
+				ResolutionWindow:  metav1.Duration{Duration: 720 * time.Hour},
+				Valkey: &scmv1alpha1.ValkeyConfig{
+					Endpoint:  "valkey:6379",
+					SecretRef: &corev1.LocalObjectReference{Name: "valkey-secret"},
+				},
+			},
+			Org: "acme", AuthMode: "token", TokenKey: "token",
+		},
+	}
+	env := githubEnv(cr)
+	e, ok := getEnv(env, "VALKEY_PASSWORD")
+	if !ok {
+		t.Fatalf("VALKEY_PASSWORD not present in env: %+v", env)
+	}
+	if e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("VALKEY_PASSWORD.ValueFrom.SecretKeyRef = nil, want a secretKeyRef")
+	}
+	if e.ValueFrom.SecretKeyRef.Name != "valkey-secret" {
+		t.Fatalf("VALKEY_PASSWORD secretKeyRef.Name = %q, want valkey-secret", e.ValueFrom.SecretKeyRef.Name)
+	}
+	if e.ValueFrom.SecretKeyRef.Key != "password" {
+		t.Fatalf("VALKEY_PASSWORD secretKeyRef.Key = %q, want password (default)", e.ValueFrom.SecretKeyRef.Key)
+	}
+}

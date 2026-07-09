@@ -69,14 +69,12 @@ func run(ctx context.Context, providerName string, once bool, repo string) error
 
 	coll := collector.New(collector.Entry{Provider: prov, Target: cfg.Target(), Repo: repo})
 
-	var remediation metrics.RemediationReader
-	var lcStore *store.Valkey
-	if cfg.Lifecycle.Enabled {
-		lcStore, err = store.NewValkey(store.Options{Addr: cfg.Lifecycle.ValkeyAddr, Password: cfg.Lifecycle.ValkeyPassword})
-		if err != nil {
-			return err
-		}
+	lcStore, connected := openRemediationStore(cfg.Lifecycle)
+	if lcStore != nil {
 		defer func() { _ = lcStore.Close() }()
+	}
+	var remediation metrics.RemediationReader
+	if lcStore != nil {
 		remediation = lcStore
 	}
 
@@ -86,6 +84,12 @@ func run(ctx context.Context, providerName string, once bool, repo string) error
 	}, remediation)
 	if err != nil {
 		return err
+	}
+	if cfg.Lifecycle.Enabled && !connected {
+		// Valkey was configured but unreachable: never fatal to the Job. The remediation
+		// histogram is skipped this run, but every other signal still pushes; record one
+		// lifecycle scrape error so the gap is visible (scm_exporter_scrape_errors{source="lifecycle"}).
+		recordScrapeErr(prov.Name(), provider.SourceLifecycle)
 	}
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -123,6 +127,24 @@ func run(ctx context.Context, providerName string, once bool, repo string) error
 	// Blocks until a signal cancels ctx; the periodic OTLP/console reader is stopped by
 	// the deferred mp.Shutdown.
 	return coll.Run(ctx, cfg.PollInterval, recordScrapeErr)
+}
+
+// openRemediationStore attempts to open the lifecycle store when enabled. It returns the
+// store (nil when disabled or unreachable) and connected=false when lifecycle is enabled
+// but the store could not be reached -- a non-fatal condition the caller records as a
+// lifecycle scrape error. It never returns an error for a reachability failure: config.Load
+// already rejects a lifecycle-enabled config with no ValkeyAddr as a fatal misconfiguration,
+// so by the time this runs, a failure here is purely a runtime connectivity problem.
+func openRemediationStore(cfg config.LifecycleConfig) (st *store.Valkey, connected bool) {
+	if !cfg.Enabled {
+		return nil, false
+	}
+	s, err := store.NewValkey(store.Options{Addr: cfg.ValkeyAddr, Password: cfg.ValkeyPassword})
+	if err != nil {
+		zlog.Warn().Err(err).Str("addr", cfg.ValkeyAddr).Msg("lifecycle: Valkey unreachable; remediation histogram disabled for this run")
+		return nil, false
+	}
+	return s, true
 }
 
 func buildProvider(cfg config.Config, repo string) (provider.Provider, error) {
