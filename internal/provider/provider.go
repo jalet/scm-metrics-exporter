@@ -18,6 +18,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Provider polls a single source-control platform and reports its metrics.
@@ -78,6 +79,10 @@ type RepoMetrics struct {
 	// lookback window. It is populated only when workflow collection is enabled, and feeds
 	// the scm.workflow_runs.recent gauge.
 	WorkflowRuns []WorkflowRunStat
+	// ResolvedFindings lists findings resolved within the lifecycle resolution window. It
+	// is populated only when lifecycle collection is enabled, and feeds the finding-state
+	// gauge and (via the store) the remediation histogram.
+	ResolvedFindings []ResolvedFinding
 }
 
 // WorkflowRunStat is the count of recent CI runs for one workflow and conclusion (for
@@ -145,6 +150,20 @@ type Finding struct {
 	Tool string
 }
 
+// ResolvedFinding is a security finding that has left the open state (fixed or dismissed)
+// within the resolution window. State is the coarse lifecycle state (State* constants);
+// Resolution is the normalized three-way outcome (Resolution* constants). ID is the
+// provider-stable alert identifier used to deduplicate remediation counting.
+type ResolvedFinding struct {
+	ID         string
+	Category   string
+	Severity   string
+	State      string
+	Resolution string
+	CreatedAt  time.Time
+	ResolvedAt time.Time
+}
+
 // RateLimit is the remaining API quota for one resource of a provider.
 type RateLimit struct {
 	// Resource identifies the API surface, one of the Resource* constants.
@@ -185,6 +204,68 @@ const (
 	SourceSecretScanning = "secret_scanning"
 	SourceWorkflows      = "workflows"
 )
+
+// SourceLifecycle labels scrape errors from the resolved-alert (lifecycle) collection path.
+const SourceLifecycle = "lifecycle"
+
+// Normalized remediation outcomes emitted on the "resolution" histogram label.
+const (
+	ResolutionFixed                 = "fixed"
+	ResolutionDismissedNotARisk     = "dismissed_not_a_risk"
+	ResolutionDismissedAcceptedRisk = "dismissed_accepted_risk"
+)
+
+// Coarse finding lifecycle states emitted on the "state" attribute of scm.findings.by_state.
+const (
+	StateOpen          = "open"
+	StateFixed         = "fixed"
+	StateDismissed     = "dismissed"
+	StateAutoDismissed = "auto_dismissed"
+	StateResolved      = "resolved"
+)
+
+// RemediationBucket is one cumulative histogram bucket: LE is the upper bound in seconds
+// (math.Inf(1) for the overflow bucket) and Count is the cumulative observation count.
+type RemediationBucket struct {
+	LE    float64
+	Count int64
+}
+
+// RemediationSeries is one scope's cumulative remediation histogram, read from the store
+// for emission as monotonic counters.
+type RemediationSeries struct {
+	Provider   string
+	Repo       string
+	Category   string
+	Resolution string
+	Buckets    []RemediationBucket
+	Sum        float64
+	Count      int64
+}
+
+// RemediationBucketBounds are the finite histogram upper bounds in seconds (1h..90d). The
+// store adds an implicit +Inf overflow bucket. Single source of truth for both the store
+// (which fields to increment) and the metrics layer (which le labels to emit).
+var RemediationBucketBounds = []float64{3600, 21600, 86400, 259200, 604800, 1209600, 2592000, 7776000}
+
+// remediationScopeSep joins the scope label tuple. The unit separator never appears in a
+// repository path or the fixed provider/category/resolution enums, so the join is reversible.
+const remediationScopeSep = "\x1f"
+
+// RemediationScope encodes the histogram label tuple into a single Valkey scope key.
+func RemediationScope(providerName, repo, category, resolution string) string {
+	return strings.Join([]string{providerName, repo, category, resolution}, remediationScopeSep)
+}
+
+// ParseRemediationScope reverses RemediationScope, returning ok=false for any string that is
+// not exactly four separator-joined fields.
+func ParseRemediationScope(scope string) (providerName, repo, category, resolution string, ok bool) {
+	parts := strings.Split(scope, remediationScopeSep)
+	if len(parts) != 4 {
+		return "", "", "", "", false
+	}
+	return parts[0], parts[1], parts[2], parts[3], true
+}
 
 // API resources, emitted on the "resource" attribute of
 // scm.api.rate_limit_remaining.

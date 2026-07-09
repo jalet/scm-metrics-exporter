@@ -30,6 +30,20 @@ func TestNormalizeSeverity(t *testing.T) {
 	}
 }
 
+func TestRemediationScopeRoundTrip(t *testing.T) {
+	scope := RemediationScope("gitlab", "grp/sub/svc", CategoryDependency, ResolutionFixed)
+	p, r, c, res, ok := ParseRemediationScope(scope)
+	if !ok || p != "gitlab" || r != "grp/sub/svc" || c != CategoryDependency || res != ResolutionFixed {
+		t.Fatalf("round trip failed: got (%q,%q,%q,%q,%v)", p, r, c, res, ok)
+	}
+}
+
+func TestParseRemediationScopeRejectsMalformed(t *testing.T) {
+	if _, _, _, _, ok := ParseRemediationScope("only:one:field"); ok {
+		t.Fatal("expected ok=false for a scope without the unit-separator layout")
+	}
+}
+
 func FuzzNormalizeSeverity(f *testing.F) {
 	for _, seed := range []string{"CRITICAL", "moderate", "  Low ", "", "weird value", "HIGH", "info"} {
 		f.Add(seed)
