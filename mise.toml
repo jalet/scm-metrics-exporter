@@ -21,6 +21,7 @@ helm = "4.2.2"
 "go:sigs.k8s.io/controller-tools/cmd/controller-gen" = "v0.21.0"
 "go:sigs.k8s.io/controller-runtime/tools/setup-envtest" = "release-0.24"
 "go:golang.org/x/vuln/cmd/govulncheck" = "latest"
+"go:github.com/losisin/helm-values-schema-json" = "1.9.2"
 
 [env]
 ENVTEST_K8S_VERSION = "1.34.0"
@@ -87,6 +88,18 @@ run = "RUN_E2E=1 go test -count=1 ./test/e2e/..."
 description = "Regenerate the chart CRD + ClusterRole templates from config/ (run after manifests)"
 run = "bash hack/chart-sync.sh"
 
+[tasks.schema]
+description = "Generate the Helm chart values.schema.json from values.yaml (no annotations)"
+# -schemaRoot.additionalProperties=false rejects unknown top-level keys (catches typos in
+# values.yaml overrides) while leaving nested free-form maps (nodeSelector, annotations, ...)
+# open, so it does not break legitimate arbitrary-key values.
+run = "helm-values-schema-json -input charts/scm-metrics-exporter/values.yaml -output charts/scm-metrics-exporter/values.schema.json -draft 7 -schemaRoot.title 'scm-metrics-exporter values' -schemaRoot.additionalProperties=false"
+
+[tasks."schema:check"]
+description = "Regenerate values.schema.json and fail if it is stale vs values.yaml"
+depends = ["schema"]
+run = "git diff --exit-code -- charts/scm-metrics-exporter/values.schema.json"
+
 [tasks."helm:lint"]
 description = "Lint the Helm chart"
 run = "helm lint charts/scm-metrics-exporter"
@@ -102,4 +115,4 @@ run = "git diff --exit-code -- config 'api/**/zz_generated.deepcopy.go' 'charts/
 
 [tasks.ci]
 description = "Run all CI checks (extended per epic in Epic 12)"
-depends = ["fmt:go:check", "vet", "lint:go", "manifests:check", "vuln", "build", "test", "helm:lint", "helm:template"]
+depends = ["fmt:go:check", "vet", "lint:go", "manifests:check", "schema:check", "vuln", "build", "test", "helm:lint", "helm:template"]
