@@ -6,7 +6,16 @@
       "component": "scm-metrics-exporter",
       "include-component-in-tag": false,
       "extra-files": [
-        "charts/scm-metrics-exporter/Chart.yaml"
+        {
+          "type": "yaml",
+          "path": "charts/scm-metrics-exporter/Chart.yaml",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "yaml",
+          "path": "charts/scm-metrics-exporter/Chart.yaml",
+          "jsonpath": "$.appVersion"
+        }
       ]
     }
   }
