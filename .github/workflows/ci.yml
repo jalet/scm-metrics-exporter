@@ -14,18 +14,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ci:
-    name: lint + test + build
+  # lint / test / build run as separate parallel jobs so they get their own CPU
+  # instead of thrashing one runner. Each leg maps to a `mise run ci:<group>` task;
+  # together they cover the same checks as `mise run ci`.
+  checks:
+    name: ${{ matrix.group }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [lint, test, build]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
-      # `mise run ci` fans out lint:go, build, test, vet and vuln concurrently;
-      # on a cold cache golangci-lint's go/packages load lost the CPU race and
-      # timed out. Warming the Go build/module (and golangci-lint) caches makes
-      # package loading near-instant and keeps the parallel run within budget.
+      # Rotating key: github.run_id makes the primary key always miss, so a cache with
+      # the current toolchain's objects is saved every run; restore-keys warms from the
+      # newest matching lineage. mise.lock pins the Go version, so a toolchain bump starts
+      # a clean lineage and never restores stale, unusable build objects. This avoids the
+      # immutable-key trap where a static go.sum key holds mismatched objects forever.
       - name: Cache Go build, module, and lint caches
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -33,13 +41,11 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
             ~/.cache/golangci-lint
-          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          key: go-${{ runner.os }}-${{ matrix.group }}-${{ hashFiles('mise.lock', 'go.sum') }}-${{ github.run_id }}
           restore-keys: |
-            go-${{ runner.os }}-
-      # Runs fmt:go:check, vet, lint:go, manifests:check (+ chart:sync drift),
-      # vuln, build, test, helm:lint, helm:template. Controller envtest tests are
-      # skipped here (no KUBEBUILDER_ASSETS) and covered by the envtest job.
-      - run: mise run ci
+            go-${{ runner.os }}-${{ matrix.group }}-${{ hashFiles('mise.lock', 'go.sum') }}-
+            go-${{ runner.os }}-${{ matrix.group }}-
+      - run: mise run ci:${{ matrix.group }}
 
   envtest:
     name: controller envtest
@@ -55,9 +61,10 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          key: go-${{ runner.os }}-envtest-${{ hashFiles('mise.lock', 'go.sum') }}-${{ github.run_id }}
           restore-keys: |
-            go-${{ runner.os }}-
+            go-${{ runner.os }}-envtest-${{ hashFiles('mise.lock', 'go.sum') }}-
+            go-${{ runner.os }}-envtest-
       - name: Cache envtest binaries
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
