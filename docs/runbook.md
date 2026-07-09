@@ -66,6 +66,42 @@ Job: `graphql` is often a token lacking Dependabot access, `rest` is code scanni
 or the feature not enabled, `secret_scanning` is secret-scanning access. A failed source is
 partial -- the Job still pushes the other signals and exits 0.
 
+## Valkey operations (alert lifecycle / MTTR)
+
+`spec.collectLifecycle: true` (see the [CRD reference](crd-reference.md)) backs the
+remediation-time histogram with Valkey: a dedup set per scope plus cumulative bucket
+counters, so re-running collection Jobs never double-counts a resolved finding.
+
+**Bundled vs bring-your-own:**
+
+- The chart can deploy a minimal Valkey via `valkey.deploy: true` -- a single-replica,
+  unauthenticated, no-HA, no-backup StatefulSet with a `data` PVC. It is meant for
+  evaluation and small deployments only.
+- **Prefer bring-your-own (BYO) in production.** Point `spec.valkey.endpoint` (and
+  optionally `spec.valkey.secretRef` / `passwordKey` for auth) at a properly operated
+  Valkey/Redis with HA and backups, and leave `valkey.deploy: false` (the chart default).
+
+**Caveat on the bundled StatefulSet:** it runs with the chart's restricted
+`securityContext` (`readOnlyRootFilesystem: true`), so the container can only write to the
+`data` PVC mounted at `/data`. This works with the pinned Valkey image at the time of
+writing. If a future Valkey image version needs to write anywhere else (a temp directory,
+a different data path), it will fail under `readOnlyRootFilesystem: true` and need either
+an additional `emptyDir` mount or a relaxed `securityContext` on that container. Validate
+the bundled option with a real deploy (not just `helm template`) before relying on it,
+especially across a Valkey image upgrade.
+
+**Failure is non-fatal:** if Valkey is unreachable from a collection Job, the histogram
+pass is skipped -- a `scm_exporter_scrape_errors_total{source="lifecycle"}` is recorded --
+but every other signal (open findings, posture, workflow runs) still pushes over OTLP. A
+lifecycle failure never fails the Job.
+
+**Data loss is a benign counter reset:** if Valkey's data is lost (volume wiped, instance
+replaced without the PVC), the cumulative bucket/sum/count counters reset to zero and climb
+again as findings are re-counted on the next cycles. PromQL `rate()` and `increase()`
+already tolerate counter resets, so no manual remediation is required; a `histogram_quantile`
+dashboard over a window spanning the reset will show a transient dip, not a spike or an
+error.
+
 ## Upgrade CRDs
 
 CRDs are managed by the chart (`crds.enabled: true`) and updated by `helm upgrade`.

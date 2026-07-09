@@ -11,6 +11,7 @@ import (
 // +kubebuilder:validation:XValidation:rule="self.targetType != 'user' || (has(self.user) && size(self.user) > 0)",message="targetType 'user' requires user"
 // +kubebuilder:validation:XValidation:rule="self.authMode != 'app' || (has(self.appID) && self.appID > 0 && has(self.appInstallationID) && self.appInstallationID > 0 && has(self.appPrivateKeyKey) && size(self.appPrivateKeyKey) > 0)",message="authMode 'app' requires appID, appInstallationID, and appPrivateKeyKey"
 // +kubebuilder:validation:XValidation:rule="self.authMode != 'token' || (has(self.tokenKey) && size(self.tokenKey) > 0)",message="authMode 'token' requires tokenKey"
+// +kubebuilder:validation:XValidation:rule="!self.collectLifecycle || has(self.valkey)",message="valkey is required when collectLifecycle is true"
 type GitHubMetricsExporterSpec struct {
 	ExporterSpec `json:",inline"`
 

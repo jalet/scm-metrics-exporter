@@ -24,6 +24,15 @@ These fields are present on both `GitHubMetricsExporter` and `GitLabMetricsExpor
 | `collectWorkflows` | boolean | `false` | Collect recent CI-run metrics (`scm_workflow_runs_recent`): GitHub Actions runs or GitLab pipelines. Opt-in (adds an API call per repo + cardinality). |
 | `workflowLookback` | duration string | `168h` | How far back to count CI runs (used when `collectWorkflows: true`). |
 | `credentialsSecret.name` | string | (required) | Secret in the CR namespace holding the credentials. |
+| `collectLifecycle` | boolean | `false` | Collect resolved findings and emit the remediation-time histogram (`scm_finding_remediation_seconds`) and the finding-state gauge (`scm_findings_by_state`). Requires `valkey` (enforced by CEL, see below). |
+| `resolutionWindow` | duration string | `2160h` (90d) | How far back resolved findings are collected, and the Valkey dedup TTL. Used when `collectLifecycle: true`. |
+| `valkey.endpoint` | string | (required when `collectLifecycle: true`) | Valkey `host:port` backing the remediation histogram, for example `valkey.observability:6379`. |
+| `valkey.secretRef.name` | string | (optional) | Secret in the CR namespace holding the Valkey password under `passwordKey`. Omit for a passwordless Valkey. |
+| `valkey.passwordKey` | string | `password` | Secret key holding the Valkey password. |
+
+**Validation (CEL):** `collectLifecycle: true` requires a populated `valkey` block (the
+runtime config also enforces this independently, so a CR that somehow bypasses the CEL
+check still fails fast at Job start rather than silently skipping the histogram).
 
 ### `RepoFilter` (used by `autoDiscover.include` / `.exclude`)
 

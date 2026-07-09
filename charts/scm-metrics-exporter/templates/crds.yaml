@@ -165,6 +165,7 @@ spec:
                   (for example "CodeQL"). Empty counts all tools.
                 type: string
               collectLifecycle:
+                default: false
                 description: |-
                   CollectLifecycle enables resolved-alert collection: the remediation-time histogram
                   (scm_finding_remediation_seconds) and the finding-state gauge (scm_findings_by_state).
@@ -380,6 +381,8 @@ spec:
             - message: authMode 'token' requires tokenKey
               rule: self.authMode != 'token' || (has(self.tokenKey) && size(self.tokenKey)
                 > 0)
+            - message: valkey is required when collectLifecycle is true
+              rule: '!self.collectLifecycle || has(self.valkey)'
           status:
             description: ExporterStatus is the shared status for provider CRDs.
             properties:
@@ -607,6 +610,7 @@ spec:
                   gitlab.com.
                 type: string
               collectLifecycle:
+                default: false
                 description: |-
                   CollectLifecycle enables resolved-alert collection: the remediation-time histogram
                   (scm_finding_remediation_seconds) and the finding-state gauge (scm_findings_by_state).
@@ -818,6 +822,8 @@ spec:
             - message: targetType 'user' requires user
               rule: self.targetType != 'user' || (has(self.user) && size(self.user)
                 > 0)
+            - message: valkey is required when collectLifecycle is true
+              rule: '!self.collectLifecycle || has(self.valkey)'
           status:
             description: ExporterStatus is the shared status for provider CRDs.
             properties:

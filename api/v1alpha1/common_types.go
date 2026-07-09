@@ -68,6 +68,7 @@ type ExporterSpec struct {
 	// CollectLifecycle enables resolved-alert collection: the remediation-time histogram
 	// (scm_finding_remediation_seconds) and the finding-state gauge (scm_findings_by_state).
 	// Requires Valkey. Off by default.
+	// +kubebuilder:default=false
 	// +optional
 	CollectLifecycle bool `json:"collectLifecycle,omitempty"`
 

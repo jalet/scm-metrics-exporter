@@ -82,7 +82,7 @@ func (p *Provider) resolvedCodeScanning(ctx context.Context, owner, repo string,
 }
 
 func codeScanningResolvedAt(a *gh.Alert) time.Time {
-	if !a.GetFixedAt().Time.IsZero() {
+	if !a.GetFixedAt().IsZero() {
 		return a.GetFixedAt().Time
 	}
 	return a.GetDismissedAt().Time
@@ -164,10 +164,10 @@ func (p *Provider) resolvedDependabot(ctx context.Context, owner, repo string, s
 }
 
 func dependabotResolvedAt(a *gh.DependabotAlert) time.Time {
-	if !a.GetFixedAt().Time.IsZero() {
+	if !a.GetFixedAt().IsZero() {
 		return a.GetFixedAt().Time
 	}
-	if !a.GetAutoDismissedAt().Time.IsZero() {
+	if !a.GetAutoDismissedAt().IsZero() {
 		return a.GetAutoDismissedAt().Time
 	}
 	return a.GetDismissedAt().Time

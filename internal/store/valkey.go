@@ -15,8 +15,9 @@ import (
 
 // Options configures the Valkey connection. Addr is host:port; Password is optional.
 type Options struct {
-	Addr     string
-	Password string
+	Addr string
+	// Password is read from the VALKEY_PASSWORD env var / a Secret key, never hardcoded.
+	Password string //nolint:gosec // config field name, not a hardcoded credential (G101/G117 false positive)
 }
 
 // Valkey is a ResolutionStore backed by a Valkey/Redis server.
