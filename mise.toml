@@ -34,10 +34,6 @@ run = ["gofmt -w .", "go mod tidy"]
 description = "Fail if Go code is not gofmt-clean"
 run = 'test -z "$(gofmt -l .)"'
 
-[tasks.vet]
-description = "go vet"
-run = "go vet ./..."
-
 [tasks."lint:go"]
 description = "Run golangci-lint"
 run = "golangci-lint run ./..."
@@ -114,5 +110,19 @@ depends = ["generate", "manifests", "chart:sync"]
 run = "git diff --exit-code -- config 'api/**/zz_generated.deepcopy.go' 'charts/scm-metrics-exporter/templates/crds.yaml' 'charts/scm-metrics-exporter/templates/clusterrole.yaml'"
 
 [tasks.ci]
-description = "Run all CI checks (extended per epic in Epic 12)"
-depends = ["fmt:go:check", "vet", "lint:go", "manifests:check", "schema:check", "vuln", "build", "test", "helm:lint", "helm:template"]
+description = "Run all CI checks locally (go vet is covered by golangci-lint's govet)"
+depends = ["fmt:go:check", "lint:go", "manifests:check", "schema:check", "vuln", "build", "test", "helm:lint", "helm:template"]
+
+# CI runs these three groups as separate parallel jobs (see .github/workflows/ci.yml);
+# together they cover the same checks as `ci`. `ci` stays the one-shot local entrypoint.
+[tasks."ci:lint"]
+description = "CI lint group: formatting, golangci-lint, generated-file drift, helm"
+depends = ["fmt:go:check", "lint:go", "manifests:check", "schema:check", "helm:lint", "helm:template"]
+
+[tasks."ci:test"]
+description = "CI test group"
+depends = ["test"]
+
+[tasks."ci:build"]
+description = "CI build group: build both binaries and scan for vulnerabilities"
+depends = ["build", "vuln"]
