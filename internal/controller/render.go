@@ -190,7 +190,7 @@ func githubCredentialVolume(cr *scmv1alpha1.GitHubMetricsExporter) ([]corev1.Vol
 			Secret: &corev1.SecretVolumeSource{
 				SecretName:  cr.Spec.CredentialsSecret.Name,
 				Items:       []corev1.KeyToPath{{Key: cr.Spec.AppPrivateKeyKey, Path: appPEMFileName}},
-				DefaultMode: ptr.To(int32(0o400)),
+				DefaultMode: ptr.To(int32(0o440)), // group-readable; the pod's FSGroup owns it
 			},
 		},
 	}
@@ -245,8 +245,11 @@ func restrictedContainerSecurityContext() *corev1.SecurityContext {
 
 func restrictedPodSecurityContext() *corev1.PodSecurityContext {
 	return &corev1.PodSecurityContext{
-		RunAsNonRoot:   ptr.To(true),
-		RunAsUser:      ptr.To(runAsUser),
+		RunAsNonRoot: ptr.To(true),
+		RunAsUser:    ptr.To(runAsUser),
+		// FSGroup makes mounted volume files (the GitHub App key Secret) group-owned by the
+		// runtime group, so the non-root container (RunAsUser) can read the 0440 key.
+		FSGroup:        ptr.To(runAsUser),
 		SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 	}
 }
