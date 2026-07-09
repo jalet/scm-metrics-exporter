@@ -343,11 +343,16 @@ After changing API types or RBAC markers, run `mise run generate manifests` and
   check the Job logs (`kubectl logs job/<name>`).
 - **CR `Ready=False` / `DiscoveryFailed`** -- the operator could not list repositories:
   check the credentials and that the token/App can see the target's repos/projects.
+- **`scm_exporter_scrape_errors_total{source="lifecycle"}` increasing** -- Valkey is
+  unreachable from the collection Jobs (`collectLifecycle` is on). The histogram is skipped
+  but every other metric still flows; fix reachability. See
+  [Enable remediation-time (MTTR) metrics](docs/how-to-enable-mttr.md#troubleshooting).
 
 ## Documentation
 
 - [CRD reference](docs/crd-reference.md) -- every spec field, default, and validation rule.
-- [Operator runbook](docs/runbook.md) -- deploy, rotate credentials, upgrade CRDs, cut a release.
+- [Enable remediation-time (MTTR) metrics](docs/how-to-enable-mttr.md) -- provision Valkey, turn on `collectLifecycle`, verify, and query MTTR.
+- [Operator runbook](docs/runbook.md) -- deploy, rotate credentials, Valkey operations, upgrade CRDs, cut a release.
 
 ## License
 
