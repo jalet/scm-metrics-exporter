@@ -335,6 +335,13 @@ func TestReconcileAppModeMountsKey(t *testing.T) {
 	if len(pod.Volumes) != 1 || pod.Volumes[0].Secret == nil || pod.Volumes[0].Secret.SecretName != "gh-app" {
 		t.Errorf("volumes = %+v, want secret volume gh-app", pod.Volumes)
 	}
+	// The key must be readable by the non-root runtime: mode 0440 + pod FSGroup owning it.
+	if m := pod.Volumes[0].Secret.DefaultMode; m == nil || *m != 0o440 {
+		t.Errorf("app key volume DefaultMode = %v, want 0440", m)
+	}
+	if pod.SecurityContext == nil || pod.SecurityContext.FSGroup == nil || *pod.SecurityContext.FSGroup != 65532 {
+		t.Errorf("pod FSGroup = %v, want 65532 (so uid 65532 can read the 0440 key)", pod.SecurityContext)
+	}
 	if e, ok := getEnv(c.Env, "GITHUB_APP_PRIVATE_KEY_PATH"); !ok || e.Value != appPEMMountPath+"/"+appPEMFileName {
 		t.Errorf("GITHUB_APP_PRIVATE_KEY_PATH = %+v", e)
 	}
