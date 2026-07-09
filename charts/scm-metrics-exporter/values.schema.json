@@ -215,5 +215,6 @@
         "topologySpreadConstraints": {
             "type": "array"
         }
-    }
+    },
+    "additionalProperties": false
 }

@@ -90,7 +90,10 @@ run = "bash hack/chart-sync.sh"
 
 [tasks.schema]
 description = "Generate the Helm chart values.schema.json from values.yaml (no annotations)"
-run = "helm-values-schema-json -input charts/scm-metrics-exporter/values.yaml -output charts/scm-metrics-exporter/values.schema.json -draft 7 -schemaRoot.title 'scm-metrics-exporter values'"
+# -schemaRoot.additionalProperties=false rejects unknown top-level keys (catches typos in
+# values.yaml overrides) while leaving nested free-form maps (nodeSelector, annotations, ...)
+# open, so it does not break legitimate arbitrary-key values.
+run = "helm-values-schema-json -input charts/scm-metrics-exporter/values.yaml -output charts/scm-metrics-exporter/values.schema.json -draft 7 -schemaRoot.title 'scm-metrics-exporter values' -schemaRoot.additionalProperties=false"
 
 [tasks."schema:check"]
 description = "Regenerate values.schema.json and fail if it is stale vs values.yaml"
