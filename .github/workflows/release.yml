@@ -67,7 +67,13 @@ jobs:
           image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
           output-format: sarif
           fail-build: false
+      # Best-effort: uploading to code scanning needs GitHub Advanced Security, which a
+      # private repo may not have ("Resource not accessible by integration"). Don't fail
+      # the release over it -- the image/signature/SBOM are already pushed by this point.
+      # A real build/push/sign/scan failure still fails the job (those steps aren't
+      # tolerated).
       - name: Upload scan results
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@c35d1b164463ee62a100735382aaaa525c5d3496 # codeql-bundle-v2.25.6
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
