@@ -17,22 +17,23 @@ type RecordStore interface {
 }
 
 // Record walks a snapshot's resolved findings and records each into the store under its
-// remediation scope. A finding with a zero or non-positive duration, or an empty id, is
-// skipped. A duration longer than the resolution window is also skipped: it cannot be a
-// real in-window observation and signals a bad or zero-value timestamp (for example a
-// CreatedAt that failed to parse and fell back to the zero time), which would otherwise
-// inflate the +Inf overflow bucket as a bogus multi-decade remediation. Store errors are
-// joined and returned; a returned error is non-fatal to the caller (recorded as a lifecycle
-// source error).
+// remediation scope. A finding with an empty id, a zero CreatedAt, or a non-positive
+// duration is skipped. The zero-CreatedAt guard targets a timestamp that failed to parse and
+// fell back to the zero time (for example GitLab's parser on a malformed detectedAt), which
+// would otherwise land a bogus multi-decade "remediation" in the +Inf bucket. A duration
+// that legitimately exceeds the resolution window is kept: a long-lived finding created well
+// before the window but resolved within it is a real, slow remediation and belongs in the
+// +Inf bucket. Store errors are joined and returned; a returned error is non-fatal to the
+// caller (recorded as a lifecycle source error).
 func Record(ctx context.Context, st RecordStore, providerName string, snap provider.Snapshot, window time.Duration) error {
 	var errs []error
 	for _, repo := range snap.Repos {
 		for _, rf := range repo.ResolvedFindings {
-			if rf.ID == "" || rf.Resolution == "" {
+			if rf.ID == "" || rf.Resolution == "" || rf.CreatedAt.IsZero() {
 				continue
 			}
 			duration := rf.ResolvedAt.Sub(rf.CreatedAt)
-			if duration <= 0 || duration > window {
+			if duration <= 0 {
 				continue
 			}
 			scope := provider.RemediationScope(providerName, repo.Name, rf.Category, rf.Resolution)

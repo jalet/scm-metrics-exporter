@@ -73,3 +73,30 @@ func TestRecordSkipsBogusCreatedAt(t *testing.T) {
 		t.Fatalf("calls[0].id = %q, want good-1", fs.calls[0].id)
 	}
 }
+
+// TestRecordKeepsSlowRemediationBeyondWindow ensures a legitimately slow remediation is not
+// dropped: a finding created well before the resolution window but resolved within it has a
+// duration exceeding the window, yet it is a real observation that belongs in the +Inf
+// bucket. Only a zero CreatedAt (parse fallback), not a large-but-valid duration, is skipped.
+func TestRecordKeepsSlowRemediationBeyondWindow(t *testing.T) {
+	window := 90 * 24 * time.Hour
+	created := time.Unix(1_000_000, 0)
+	resolved := created.Add(120 * 24 * time.Hour) // 120d > 90d window, but a real remediation
+	snap := provider.Snapshot{Repos: []provider.RepoMetrics{{
+		Name: "acme/svc",
+		ResolvedFindings: []provider.ResolvedFinding{{
+			ID: "slow-1", Category: provider.CategoryDependency, Resolution: provider.ResolutionFixed,
+			CreatedAt: created, ResolvedAt: resolved,
+		}},
+	}}}
+	fs := &fakeStore{}
+	if err := Record(context.Background(), fs, "github", snap, window); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if len(fs.calls) != 1 {
+		t.Fatalf("calls=%d, want 1 (a slow remediation with duration > window must be kept)", len(fs.calls))
+	}
+	if fs.calls[0].duration != 120*24*time.Hour {
+		t.Fatalf("duration = %v, want 120 days", fs.calls[0].duration)
+	}
+}
