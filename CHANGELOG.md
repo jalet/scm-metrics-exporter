@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.1](https://github.com/jalet/scm-metrics-exporter/compare/v0.4.0...v0.4.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* **chart:** keep appVersion in sync with version ([#18](https://github.com/jalet/scm-metrics-exporter/issues/18)) ([2f296e9](https://github.com/jalet/scm-metrics-exporter/commit/2f296e909e66d4ff762448315baed8ababc64d10))
+* **operator:** make the mounted GitHub App key readable by the non-root Job ([#20](https://github.com/jalet/scm-metrics-exporter/issues/20)) ([a1689b8](https://github.com/jalet/scm-metrics-exporter/commit/a1689b849a6ee4df90beb30450a12a45a66e55b9))
+* **operator:** route klog through the controller-runtime logger ([#19](https://github.com/jalet/scm-metrics-exporter/issues/19)) ([0a7933d](https://github.com/jalet/scm-metrics-exporter/commit/0a7933dc15194fdc887f654dff0fd0e9aa1c296b))
+
 ## [0.4.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.3.0...v0.4.0) (2026-07-08)
 
 
