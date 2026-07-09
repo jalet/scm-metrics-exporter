@@ -55,7 +55,10 @@ type projectResolvedVulnResponse struct {
 	Errors []graphqlError `json:"errors"`
 }
 
-// collectResolvedFindings pages a project's resolved/dismissed findings within the window.
+// collectResolvedFindings pages a project's resolved/dismissed findings up to maxPages,
+// filtering each node to those resolved within the window. The connection is sorted by
+// detection time, not resolution time, so a node's resolution time gives no information
+// about later pages: paging always continues based on pageInfo.hasNextPage alone.
 func (p *Provider) collectResolvedFindings(ctx context.Context, path string) ([]provider.ResolvedFinding, error) {
 	since := time.Now().Add(-p.resolutionWindow)
 	var out []provider.ResolvedFinding
@@ -72,7 +75,6 @@ func (p *Provider) collectResolvedFindings(ctx context.Context, path string) ([]
 		if gr.Data.Project == nil || gr.Data.Project.Vulnerabilities == nil {
 			return out, nil // non-Ultimate / no access: nothing to collect, not an error
 		}
-		reachedWindow := false
 		for _, n := range gr.Data.Project.Vulnerabilities.Nodes {
 			cat, ok := reportTypeCategory[n.ReportType]
 			if !ok {
@@ -80,7 +82,6 @@ func (p *Provider) collectResolvedFindings(ctx context.Context, path string) ([]
 			}
 			resolvedAt := gitlabResolvedAt(n.State, n.ResolvedAt, n.DismissedAt)
 			if resolvedAt.Before(since) {
-				reachedWindow = true // sorted newest-first: everything after is older
 				continue
 			}
 			out = append(out, provider.ResolvedFinding{
@@ -94,7 +95,7 @@ func (p *Provider) collectResolvedFindings(ctx context.Context, path string) ([]
 			})
 		}
 		pi := gr.Data.Project.Vulnerabilities.PageInfo
-		if reachedWindow || !pi.HasNextPage {
+		if !pi.HasNextPage {
 			break
 		}
 		after = &pi.EndCursor
