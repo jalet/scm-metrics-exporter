@@ -160,6 +160,12 @@ spec:
                   CodeScanningTool optionally filters code scanning alerts to one SARIF tool
                   (for example "CodeQL"). Empty counts all tools.
                 type: string
+              collectLifecycle:
+                description: |-
+                  CollectLifecycle enables resolved-alert collection: the remediation-time histogram
+                  (scm_finding_remediation_seconds) and the finding-state gauge (scm_findings_by_state).
+                  Requires Valkey. Off by default.
+                type: boolean
               collectWorkflows:
                 description: |-
                   CollectWorkflows enables recent CI-run metrics (scm_workflow_runs_recent): GitHub
@@ -230,6 +236,12 @@ spec:
                 format: int32
                 minimum: 1
                 type: integer
+              resolutionWindow:
+                default: 2160h
+                description: |-
+                  ResolutionWindow bounds how far back resolved alerts are collected and is the
+                  deduplication TTL. Used when CollectLifecycle is true.
+                type: string
               resources:
                 description: Resources are the collection Job container's compute
                   resources.
@@ -306,6 +318,39 @@ spec:
                   User is the GitHub user account to poll (targetType "user"). Code scanning is
                   gathered per-repository for a user (GitHub has no org-scoped user endpoint).
                 type: string
+              valkey:
+                description: |-
+                  Valkey configures the store backing the remediation histogram. Required when
+                  CollectLifecycle is true.
+                properties:
+                  endpoint:
+                    description: Endpoint is the Valkey host:port (for example "valkey.observability:6379").
+                    minLength: 1
+                    type: string
+                  passwordKey:
+                    default: password
+                    description: PasswordKey is the Secret key holding the Valkey
+                      password (default "password").
+                    type: string
+                  secretRef:
+                    description: |-
+                      SecretRef names a Secret in the CR namespace holding the Valkey password under
+                      PasswordKey. Omit for a passwordless Valkey.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                required:
+                - endpoint
+                type: object
               workflowLookback:
                 default: 168h
                 description: |-

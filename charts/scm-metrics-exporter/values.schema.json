@@ -217,6 +217,20 @@
         },
         "topologySpreadConstraints": {
             "type": "array"
+        },
+        "valkey": {
+            "type": "object",
+            "properties": {
+                "deploy": {
+                    "type": "boolean"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "storage": {
+                    "type": "string"
+                }
+            }
         }
     },
     "additionalProperties": false
