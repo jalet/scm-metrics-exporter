@@ -1,5 +1,11 @@
 # Default values for scm-metrics-exporter (the operator).
 
+# global is reserved by Helm: when this chart is used as a dependency, Helm coalesces a
+# (possibly empty) global map into the subchart's values. It must be present here so the
+# strict values.schema.json (additionalProperties: false at the root) accepts it; otherwise
+# the chart is unusable as a dependency ("additional properties 'global' not allowed").
+global: {}
+
 image:
   repository: ghcr.io/jalet/scm-metrics-exporter
   # tag defaults to .Chart.AppVersion when empty.
