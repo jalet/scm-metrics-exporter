@@ -70,7 +70,7 @@ func run(ctx context.Context, providerName string, once bool, repo string) error
 	mp, recordScrapeErr, err := metrics.Setup(ctx, coll, version, metrics.Dimensions{
 		Ecosystem: cfg.Dimensions.Ecosystem,
 		Tool:      cfg.Dimensions.Tool,
-	})
+	}, nil)
 	if err != nil {
 		return err
 	}

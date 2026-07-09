@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -24,12 +25,12 @@ func (f fakeSource) Latest(name string) (provider.Snapshot, bool) {
 	return s, ok
 }
 
-func setupReader(t *testing.T, src SnapshotSource, dims Dimensions) (*sdkmetric.ManualReader, ScrapeErrorRecorder) {
+func setupReader(t *testing.T, src SnapshotSource, dims Dimensions, remediation RemediationReader) (*sdkmetric.ManualReader, ScrapeErrorRecorder) {
 	t.Helper()
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
-	record, err := register(mp.Meter("test"), src, dims)
+	record, err := register(mp.Meter("test"), src, dims, remediation)
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -76,7 +77,7 @@ func TestObservableGauges(t *testing.T) {
 		},
 	}
 
-	reader, _ := setupReader(t, src, Dimensions{})
+	reader, _ := setupReader(t, src, Dimensions{}, nil)
 	got := collect(t, reader)
 
 	gh := func(kv ...attribute.KeyValue) attribute.Set {
@@ -121,7 +122,7 @@ func TestObservableGaugesFindingDimensions(t *testing.T) {
 	}
 
 	// Dimensions off: aggregate by severity+category only (npm+pip collapse into one series).
-	off, _ := setupReader(t, src, Dimensions{})
+	off, _ := setupReader(t, src, Dimensions{}, nil)
 	wantOff := metricdata.Gauge[int64]{DataPoints: []metricdata.DataPoint[int64]{
 		{Attributes: gh(attribute.String(attrSeverity, "high"), attribute.String(attrCategory, "dependency")), Value: 2},
 		{Attributes: gh(attribute.String(attrSeverity, "critical"), attribute.String(attrCategory, "static_analysis")), Value: 1},
@@ -129,7 +130,7 @@ func TestObservableGaugesFindingDimensions(t *testing.T) {
 	metricdatatest.AssertAggregationsEqual(t, wantOff, collect(t, off)[metricSecurityFindings], metricdatatest.IgnoreTimestamp())
 
 	// Dimensions on: npm and pip split; the code-scanning finding gains a tool label.
-	on, _ := setupReader(t, src, Dimensions{Ecosystem: true, Tool: true})
+	on, _ := setupReader(t, src, Dimensions{Ecosystem: true, Tool: true}, nil)
 	wantOn := metricdata.Gauge[int64]{DataPoints: []metricdata.DataPoint[int64]{
 		{Attributes: gh(attribute.String(attrSeverity, "high"), attribute.String(attrCategory, "dependency"), attribute.String(attrEcosystem, "npm")), Value: 1},
 		{Attributes: gh(attribute.String(attrSeverity, "high"), attribute.String(attrCategory, "dependency"), attribute.String(attrEcosystem, "pip")), Value: 1},
@@ -148,7 +149,7 @@ func TestObservableRepoInfo(t *testing.T) {
 			}},
 		},
 	}
-	reader, _ := setupReader(t, src, Dimensions{})
+	reader, _ := setupReader(t, src, Dimensions{}, nil)
 
 	want := metricdata.Gauge[int64]{DataPoints: []metricdata.DataPoint[int64]{
 		{Attributes: attribute.NewSet(
@@ -176,7 +177,7 @@ func TestObservableWorkflowRuns(t *testing.T) {
 			}}},
 		},
 	}
-	reader, _ := setupReader(t, src, Dimensions{})
+	reader, _ := setupReader(t, src, Dimensions{}, nil)
 
 	gh := func(workflow, conclusion string) attribute.Set {
 		return attribute.NewSet(
@@ -194,7 +195,7 @@ func TestObservableWorkflowRuns(t *testing.T) {
 }
 
 func TestScrapeErrorCounter(t *testing.T) {
-	reader, record := setupReader(t, fakeSource{}, Dimensions{})
+	reader, record := setupReader(t, fakeSource{}, Dimensions{}, nil)
 
 	record("github", provider.SourceGraphQL)
 	record("github", provider.SourceGraphQL)
@@ -215,12 +216,110 @@ func TestScrapeErrorCounter(t *testing.T) {
 	metricdatatest.AssertAggregationsEqual(t, want, got[metricScrapeErrors], metricdatatest.IgnoreTimestamp())
 }
 
+type fakeRemediation struct{ series []provider.RemediationSeries }
+
+func (f fakeRemediation) Remediation(context.Context) ([]provider.RemediationSeries, error) {
+	return f.series, nil
+}
+
+func TestRemediationHistogramEmitted(t *testing.T) {
+	src := fakeSource{
+		names:     []string{"github"},
+		snapshots: map[string]provider.Snapshot{"github": {}},
+	}
+	rem := fakeRemediation{series: []provider.RemediationSeries{{
+		Provider: "github", Repo: "acme/svc", Category: provider.CategoryDependency, Resolution: provider.ResolutionFixed,
+		Buckets: []provider.RemediationBucket{{LE: 3600, Count: 0}, {LE: 86400, Count: 2}, {LE: math.Inf(1), Count: 2}},
+		Sum:     7200, Count: 2,
+	}}}
+
+	reader, _ := setupReader(t, src, Dimensions{}, rem)
+	got := collect(t, reader)
+
+	withLE := func(le string) attribute.Set {
+		return attribute.NewSet(
+			attribute.String(attrProvider, "github"),
+			attribute.String(attrRepo, "acme/svc"),
+			attribute.String(attrCategory, provider.CategoryDependency),
+			attribute.String(attrResolution, provider.ResolutionFixed),
+			attribute.String(attrLE, le),
+		)
+	}
+	wantBucket := metricdata.Sum[int64]{
+		Temporality: metricdata.CumulativeTemporality,
+		IsMonotonic: true,
+		DataPoints: []metricdata.DataPoint[int64]{
+			{Attributes: withLE("3600"), Value: 0},
+			{Attributes: withLE("86400"), Value: 2},
+			{Attributes: withLE("+Inf"), Value: 2},
+		},
+	}
+	metricdatatest.AssertAggregationsEqual(t, wantBucket, got[metricRemediationBucket], metricdatatest.IgnoreTimestamp())
+
+	base := attribute.NewSet(
+		attribute.String(attrProvider, "github"),
+		attribute.String(attrRepo, "acme/svc"),
+		attribute.String(attrCategory, provider.CategoryDependency),
+		attribute.String(attrResolution, provider.ResolutionFixed),
+	)
+	wantSum := metricdata.Sum[float64]{
+		Temporality: metricdata.CumulativeTemporality,
+		IsMonotonic: true,
+		DataPoints: []metricdata.DataPoint[float64]{
+			{Attributes: base, Value: 7200},
+		},
+	}
+	metricdatatest.AssertAggregationsEqual(t, wantSum, got[metricRemediationSum], metricdatatest.IgnoreTimestamp())
+
+	wantCount := metricdata.Sum[int64]{
+		Temporality: metricdata.CumulativeTemporality,
+		IsMonotonic: true,
+		DataPoints: []metricdata.DataPoint[int64]{
+			{Attributes: base, Value: 2},
+		},
+	}
+	metricdatatest.AssertAggregationsEqual(t, wantCount, got[metricRemediationCount], metricdatatest.IgnoreTimestamp())
+}
+
+func TestFindingsByStateGauge(t *testing.T) {
+	src := fakeSource{
+		names: []string{"github"},
+		snapshots: map[string]provider.Snapshot{
+			"github": {Repos: []provider.RepoMetrics{{
+				Name: "alpha",
+				Findings: []provider.Finding{
+					{Severity: provider.SeverityHigh, Category: provider.CategoryDependency},
+				},
+				ResolvedFindings: []provider.ResolvedFinding{
+					{Category: provider.CategoryDependency, State: provider.StateFixed, Resolution: provider.ResolutionFixed},
+				},
+			}}},
+		},
+	}
+	reader, _ := setupReader(t, src, Dimensions{}, nil)
+	got := collect(t, reader)
+
+	gh := func(state string) attribute.Set {
+		return attribute.NewSet(
+			attribute.String(attrProvider, "github"),
+			attribute.String(attrRepo, "alpha"),
+			attribute.String(attrCategory, provider.CategoryDependency),
+			attribute.String(attrState, state),
+		)
+	}
+	want := metricdata.Gauge[int64]{DataPoints: []metricdata.DataPoint[int64]{
+		{Attributes: gh(provider.StateOpen), Value: 1},
+		{Attributes: gh(provider.StateFixed), Value: 1},
+	}}
+	metricdatatest.AssertAggregationsEqual(t, want, got[metricFindingsByState], metricdatatest.IgnoreTimestamp())
+}
+
 func TestSetupSelectsExporterAndShutsDown(t *testing.T) {
 	// "none" avoids binding a port or emitting output while still exercising the
 	// autoexport reader selection, MeterProvider wiring, and shutdown path.
 	t.Setenv("OTEL_METRICS_EXPORTER", "none")
 
-	mp, record, err := Setup(context.Background(), fakeSource{}, "test", Dimensions{})
+	mp, record, err := Setup(context.Background(), fakeSource{}, "test", Dimensions{}, nil)
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}

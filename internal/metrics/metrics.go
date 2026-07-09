@@ -13,7 +13,9 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
+	"strings"
 
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/otel"
@@ -40,6 +42,10 @@ const (
 	metricScrapeErrors       = "scm.exporter.scrape_errors"
 	metricRepoInfo           = "scm.repo.info"
 	metricWorkflowRuns       = "scm.workflow_runs.recent"
+	metricFindingsByState    = "scm.findings.by_state"
+	metricRemediationBucket  = "scm.finding_remediation_seconds.bucket"
+	metricRemediationSum     = "scm.finding_remediation_seconds.sum"
+	metricRemediationCount   = "scm.finding_remediation_seconds.count"
 )
 
 // Metric attribute keys.
@@ -58,6 +64,9 @@ const (
 	attrDependabotEnabled = "dependabot_enabled"
 	attrWorkflow          = "workflow"
 	attrConclusion        = "conclusion"
+	attrState             = "state"
+	attrLE                = "le"
+	attrResolution        = "resolution"
 )
 
 // SnapshotSource is the read side of the collector cache that the metrics callback
@@ -68,6 +77,12 @@ type SnapshotSource interface {
 	// Latest returns the most recent snapshot for a provider, or ok=false if none
 	// has been polled yet.
 	Latest(name string) (provider.Snapshot, bool)
+}
+
+// RemediationReader supplies the cumulative remediation histogram for emission as monotonic
+// counters. It is optional: pass nil to Setup to disable the histogram instruments.
+type RemediationReader interface {
+	Remediation(ctx context.Context) ([]provider.RemediationSeries, error)
 }
 
 // ScrapeErrorRecorder increments the scm.exporter.scrape_errors counter for a
@@ -99,7 +114,8 @@ type Dimensions struct {
 // "scm-metrics-exporter" instead of the default "unknown_service:exporter".
 // OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES override the resource defaults.
 // Pass the build version; an empty string is valid. dims selects optional finding labels.
-func Setup(ctx context.Context, src SnapshotSource, version string, dims Dimensions) (*sdkmetric.MeterProvider, ScrapeErrorRecorder, error) {
+// remediation is optional: pass nil to disable the remediation histogram instruments.
+func Setup(ctx context.Context, src SnapshotSource, version string, dims Dimensions, remediation RemediationReader) (*sdkmetric.MeterProvider, ScrapeErrorRecorder, error) {
 	reader, err := autoexport.NewMetricReader(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("metrics: create reader: %w", err)
@@ -125,7 +141,7 @@ func Setup(ctx context.Context, src SnapshotSource, version string, dims Dimensi
 	)
 	otel.SetMeterProvider(mp)
 
-	record, err := register(mp.Meter(meterName, metric.WithInstrumentationVersion(version)), src, dims)
+	record, err := register(mp.Meter(meterName, metric.WithInstrumentationVersion(version)), src, dims, remediation)
 	if err != nil {
 		_ = mp.Shutdown(ctx)
 		return nil, nil, err
@@ -133,10 +149,11 @@ func Setup(ctx context.Context, src SnapshotSource, version string, dims Dimensi
 	return mp, record, nil
 }
 
-// register creates the four instruments, registers the gauge callback, and returns
-// a recorder for the synchronous counter. It is separated from Setup so tests can
-// drive it with a ManualReader-backed meter.
-func register(meter metric.Meter, src SnapshotSource, dims Dimensions) (ScrapeErrorRecorder, error) {
+// register creates the instruments, registers the gauge callback (and, when remediation
+// is non-nil, the remediation counters and their own callback), and returns a recorder
+// for the synchronous counter. It is separated from Setup so tests can drive it with a
+// ManualReader-backed meter.
+func register(meter metric.Meter, src SnapshotSource, dims Dimensions, remediation RemediationReader) (ScrapeErrorRecorder, error) {
 	reviewItems, err := meter.Int64ObservableGauge(metricReviewItemsOpen,
 		metric.WithDescription("Open review items (pull or merge requests) per repository."))
 	if err != nil {
@@ -162,6 +179,11 @@ func register(meter metric.Meter, src SnapshotSource, dims Dimensions) (ScrapeEr
 	if err != nil {
 		return nil, fmt.Errorf("metrics: gauge %s: %w", metricWorkflowRuns, err)
 	}
+	byState, err := meter.Int64ObservableGauge(metricFindingsByState,
+		metric.WithDescription("Point-in-time finding count per repository, by category and lifecycle state."))
+	if err != nil {
+		return nil, fmt.Errorf("metrics: gauge %s: %w", metricFindingsByState, err)
+	}
 	scrapeErrors, err := meter.Int64Counter(metricScrapeErrors,
 		metric.WithDescription("Provider scrape errors, by source."))
 	if err != nil {
@@ -174,12 +196,53 @@ func register(meter metric.Meter, src SnapshotSource, dims Dimensions) (ScrapeEr
 			if !ok {
 				continue
 			}
-			observeSnapshot(o, name, snap, gauges{reviewItems, findings, rateLimit, repoInfo, workflowRuns}, dims)
+			observeSnapshot(o, name, snap, gauges{reviewItems, findings, rateLimit, repoInfo, workflowRuns, byState}, dims)
 		}
 		return nil
 	}
-	if _, err := meter.RegisterCallback(callback, reviewItems, findings, rateLimit, repoInfo, workflowRuns); err != nil {
+	if _, err := meter.RegisterCallback(callback, reviewItems, findings, rateLimit, repoInfo, workflowRuns, byState); err != nil {
 		return nil, fmt.Errorf("metrics: register callback: %w", err)
+	}
+
+	if remediation != nil {
+		bucket, err := meter.Int64ObservableCounter(metricRemediationBucket,
+			metric.WithDescription("Cumulative remediated findings with resolution time <= le seconds."))
+		if err != nil {
+			return nil, fmt.Errorf("metrics: counter %s: %w", metricRemediationBucket, err)
+		}
+		sum, err := meter.Float64ObservableCounter(metricRemediationSum,
+			metric.WithDescription("Cumulative sum of remediation times in seconds."))
+		if err != nil {
+			return nil, fmt.Errorf("metrics: counter %s: %w", metricRemediationSum, err)
+		}
+		count, err := meter.Int64ObservableCounter(metricRemediationCount,
+			metric.WithDescription("Cumulative count of remediated findings."))
+		if err != nil {
+			return nil, fmt.Errorf("metrics: counter %s: %w", metricRemediationCount, err)
+		}
+		remCallback := func(ctx context.Context, o metric.Observer) error {
+			series, err := remediation.Remediation(ctx)
+			if err != nil {
+				return err
+			}
+			for _, s := range series {
+				base := []attribute.KeyValue{
+					attribute.String(attrProvider, s.Provider),
+					attribute.String(attrRepo, s.Repo),
+					attribute.String(attrCategory, s.Category),
+					attribute.String(attrResolution, s.Resolution),
+				}
+				for _, b := range s.Buckets {
+					o.ObserveInt64(bucket, b.Count, metric.WithAttributes(append(base, attribute.String(attrLE, formatLE(b.LE)))...))
+				}
+				o.ObserveFloat64(sum, s.Sum, metric.WithAttributes(base...))
+				o.ObserveInt64(count, s.Count, metric.WithAttributes(base...))
+			}
+			return nil
+		}
+		if _, err := meter.RegisterCallback(remCallback, bucket, sum, count); err != nil {
+			return nil, fmt.Errorf("metrics: register remediation callback: %w", err)
+		}
 	}
 
 	record := func(providerName, source string) {
@@ -207,6 +270,7 @@ type gauges struct {
 	rateLimit    metric.Int64ObservableGauge
 	repoInfo     metric.Int64ObservableGauge
 	workflowRuns metric.Int64ObservableGauge
+	byState      metric.Int64ObservableGauge
 }
 
 // observeSnapshot emits the per-provider gauges for one snapshot. dims selects the
@@ -265,6 +329,24 @@ func observeSnapshot(o metric.Observer, name string, snap provider.Snapshot, g g
 				attribute.String(attrConclusion, wf.Conclusion),
 			))
 		}
+
+		stateCounts := map[string]int64{} // "category\x00state" -> n
+		bump := func(category, state string) { stateCounts[category+"\x00"+state]++ }
+		for _, f := range repo.Findings {
+			bump(f.Category, provider.StateOpen)
+		}
+		for _, rf := range repo.ResolvedFindings {
+			bump(rf.Category, rf.State)
+		}
+		for key, n := range stateCounts {
+			parts := strings.SplitN(key, "\x00", 2)
+			o.ObserveInt64(g.byState, n, metric.WithAttributes(
+				attribute.String(attrProvider, name),
+				attribute.String(attrRepo, repo.Name),
+				attribute.String(attrCategory, parts[0]),
+				attribute.String(attrState, parts[1]),
+			))
+		}
 	}
 
 	for _, rl := range snap.RateLimits {
@@ -274,4 +356,13 @@ func observeSnapshot(o metric.Observer, name string, snap provider.Snapshot, g g
 				attribute.String(attrResource, rl.Resource),
 			))
 	}
+}
+
+// formatLE renders a remediation histogram bucket upper bound as the "le" metric label,
+// following the Prometheus histogram convention of "+Inf" for the overflow bucket.
+func formatLE(le float64) string {
+	if math.IsInf(le, 1) {
+		return "+Inf"
+	}
+	return strconv.FormatInt(int64(le), 10)
 }
