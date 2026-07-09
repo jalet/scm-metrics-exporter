@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2](https://github.com/jalet/scm-metrics-exporter/compare/v0.4.1...v0.4.2) (2026-07-09)
+
+
+### Bug Fixes
+
+* **chart:** allow Helm's reserved `global` key in values.schema.json ([#24](https://github.com/jalet/scm-metrics-exporter/issues/24)) ([8424801](https://github.com/jalet/scm-metrics-exporter/commit/842480108b438b10c65be57789435449a4e34e98))
+* **release:** sync appVersion via release-please yaml jsonpath updater ([#23](https://github.com/jalet/scm-metrics-exporter/issues/23)) ([c58ffaa](https://github.com/jalet/scm-metrics-exporter/commit/c58ffaae02cf0cc6397f33f27b7da854975aba3b))
+
 ## [0.4.1](https://github.com/jalet/scm-metrics-exporter/compare/v0.4.0...v0.4.1) (2026-07-09)
 
 
