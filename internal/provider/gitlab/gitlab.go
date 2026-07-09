@@ -53,6 +53,10 @@ type Options struct {
 	CollectWorkflows bool
 	// WorkflowLookback bounds how far back pipelines are counted (default 7 days).
 	WorkflowLookback time.Duration
+	// CollectLifecycle enables resolved-vulnerability collection in SnapshotRepo.
+	CollectLifecycle bool
+	// ResolutionWindow bounds how far back resolved findings are counted (default 90 days).
+	ResolutionWindow time.Duration
 	HTTPClient       *http.Client
 }
 
@@ -64,10 +68,15 @@ type Provider struct {
 	maxPages         int
 	collectWorkflows bool
 	workflowLookback time.Duration
+	collectLifecycle bool
+	resolutionWindow time.Duration
 }
 
 // defaultWorkflowLookback bounds recent pipeline collection when unset.
 const defaultWorkflowLookback = 7 * 24 * time.Hour
+
+// defaultResolutionWindow bounds resolved-vulnerability collection when unset.
+const defaultResolutionWindow = 90 * 24 * time.Hour
 
 var _ provider.Provider = (*Provider)(nil)
 
@@ -95,6 +104,10 @@ func New(opts Options) (*Provider, error) {
 	if lookback <= 0 {
 		lookback = defaultWorkflowLookback
 	}
+	resolutionWindow := opts.ResolutionWindow
+	if resolutionWindow <= 0 {
+		resolutionWindow = defaultResolutionWindow
+	}
 	return &Provider{
 		rest:             &restClient{httpClient: httpClient, apiBase: apiBase, includeArchived: opts.IncludeArchived},
 		graphql:          &graphqlClient{httpClient: httpClient, endpoint: gqlEndpoint},
@@ -102,6 +115,8 @@ func New(opts Options) (*Provider, error) {
 		maxPages:         defaultMaxPages,
 		collectWorkflows: opts.CollectWorkflows,
 		workflowLookback: lookback,
+		collectLifecycle: opts.CollectLifecycle,
+		resolutionWindow: resolutionWindow,
 	}, nil
 }
 
