@@ -252,7 +252,8 @@ var RemediationBucketBounds = []float64{3600, 21600, 86400, 259200, 604800, 1209
 // repository path or the fixed provider/category/resolution enums, so the join is reversible.
 const remediationScopeSep = "\x1f"
 
-// RemediationScope encodes the histogram label tuple into a single Valkey scope key.
+// RemediationScope encodes the histogram label tuple into a single scope key used by the
+// remediation store.
 func RemediationScope(providerName, repo, category, resolution string) string {
 	return strings.Join([]string{providerName, repo, category, resolution}, remediationScopeSep)
 }
