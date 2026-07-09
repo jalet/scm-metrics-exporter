@@ -41,6 +41,67 @@ func TestRecordIfNewDedups(t *testing.T) {
 	}
 }
 
+// TestRecordIfNewDuplicateDoesNotIncrement proves a duplicate id performs no increment at
+// all: recording the same id twice must leave the histogram count and sum unchanged after
+// the second call, not merely return counted=false.
+func TestRecordIfNewDuplicateDoesNotIncrement(t *testing.T) {
+	v, _ := newTestStore(t)
+	ctx := context.Background()
+	scope := provider.RemediationScope("github", "acme/svc", provider.CategoryDependency, provider.ResolutionFixed)
+
+	first, err := v.RecordIfNew(ctx, scope, "alert-1", 2*time.Hour, 90*24*time.Hour)
+	if err != nil || !first {
+		t.Fatalf("first record: counted=%v err=%v, want true/nil", first, err)
+	}
+
+	before, err := v.Remediation(ctx)
+	if err != nil {
+		t.Fatalf("Remediation (before): %v", err)
+	}
+	if len(before) != 1 {
+		t.Fatalf("series=%d, want 1", len(before))
+	}
+	countBefore := before[0].Count
+	sumBefore := before[0].Sum
+	var bucketBefore int64 = -1
+	for _, b := range before[0].Buckets {
+		if b.LE == 21600 {
+			bucketBefore = b.Count
+		}
+	}
+	if bucketBefore < 0 {
+		t.Fatalf("bucket le=21600 not found in %+v", before[0].Buckets)
+	}
+
+	second, err := v.RecordIfNew(ctx, scope, "alert-1", 2*time.Hour, 90*24*time.Hour)
+	if err != nil || second {
+		t.Fatalf("duplicate record: counted=%v err=%v, want false/nil", second, err)
+	}
+
+	after, err := v.Remediation(ctx)
+	if err != nil {
+		t.Fatalf("Remediation (after): %v", err)
+	}
+	if len(after) != 1 {
+		t.Fatalf("series=%d, want 1", len(after))
+	}
+	if after[0].Count != countBefore {
+		t.Errorf("count changed on duplicate: got %d want %d", after[0].Count, countBefore)
+	}
+	if after[0].Sum != sumBefore {
+		t.Errorf("sum changed on duplicate: got %v want %v", after[0].Sum, sumBefore)
+	}
+	var bucketAfter int64 = -1
+	for _, b := range after[0].Buckets {
+		if b.LE == 21600 {
+			bucketAfter = b.Count
+		}
+	}
+	if bucketAfter != bucketBefore {
+		t.Errorf("bucket le=21600 changed on duplicate: got %d want %d", bucketAfter, bucketBefore)
+	}
+}
+
 func TestRemediationCumulativeBuckets(t *testing.T) {
 	v, _ := newTestStore(t)
 	ctx := context.Background()

@@ -40,39 +40,61 @@ func NewValkey(opts Options) (*Valkey, error) {
 // Close releases the connection pool.
 func (v *Valkey) Close() error { return v.client.Close() }
 
+// recordScript atomically dedups id against the scope's counted-set and, only if newly
+// added, increments every requested bucket field, the sum, and the count, and registers the
+// hist key in the index. Running this as a single Lua script avoids a lost-update window
+// where the dedup SADD succeeds but a later, separate round trip incrementing the histogram
+// fails: without atomicity that leaves the id permanently marked "counted" with its
+// contribution silently dropped, since a retry would see added==0 and never recover it.
+//
+// KEYS[1] = counted:<scope>, KEYS[2] = hist:<scope>, KEYS[3] = histkeys index
+// ARGV[1] = id, ARGV[2] = window in whole seconds, ARGV[3] = duration in seconds,
+// ARGV[4:] = bucket field names to increment by 1 (finite buckets with le >= duration, plus
+// the +Inf overflow field).
+var recordScript = redis.NewScript(`
+local added = redis.call('SADD', KEYS[1], ARGV[1])
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+if added == 0 then
+	return 0
+end
+for i = 4, #ARGV do
+	redis.call('HINCRBY', KEYS[2], ARGV[i], 1)
+end
+redis.call('HINCRBYFLOAT', KEYS[2], 'sum', ARGV[3])
+redis.call('HINCRBY', KEYS[2], 'count', 1)
+redis.call('SADD', KEYS[3], KEYS[2])
+return 1
+`)
+
 // RecordIfNew adds id to the scope's dedup set; if newly added it increments every bucket
 // with le >= duration (plus the +Inf overflow), the sum, and the count, and registers the
 // scope in the index. The dedup set's TTL is refreshed to window on every call so ids age
-// out with the query window. All writes run in one pipeline.
+// out with the query window. The dedup, TTL refresh, and all increments run atomically in a
+// single Lua script so a failure partway through can never leave an id marked "counted"
+// without its histogram contribution applied.
 func (v *Valkey) RecordIfNew(ctx context.Context, scope, id string, duration, window time.Duration) (bool, error) {
-	added, err := v.client.SAdd(ctx, countedKey(scope), id).Result()
-	if err != nil {
-		return false, fmt.Errorf("store: SADD %s: %w", scope, err)
-	}
-	// Refresh the dedup-set TTL regardless, so an active scope keeps its window.
-	if err := v.client.Expire(ctx, countedKey(scope), window).Err(); err != nil {
-		return false, fmt.Errorf("store: EXPIRE %s: %w", scope, err)
-	}
-	if added == 0 {
-		return false, nil // already counted
-	}
-
 	secs := duration.Seconds()
-	pipe := v.client.Pipeline()
-	hk := histKey(scope)
+
+	fields := make([]string, 0, len(provider.RemediationBucketBounds)+1)
 	for _, le := range provider.RemediationBucketBounds {
 		if secs <= le {
-			pipe.HIncrBy(ctx, hk, bucketField(le), 1)
+			fields = append(fields, bucketField(le))
 		}
 	}
-	pipe.HIncrBy(ctx, hk, bucketField(math.Inf(1)), 1)
-	pipe.HIncrByFloat(ctx, hk, "sum", secs)
-	pipe.HIncrBy(ctx, hk, "count", 1)
-	pipe.SAdd(ctx, histIndexKey, hk)
-	if _, err := pipe.Exec(ctx); err != nil {
-		return false, fmt.Errorf("store: increment %s: %w", scope, err)
+	fields = append(fields, bucketField(math.Inf(1)))
+
+	keys := []string{countedKey(scope), histKey(scope), histIndexKey}
+	args := make([]interface{}, 0, 3+len(fields))
+	args = append(args, id, int(window.Seconds()), secs)
+	for _, f := range fields {
+		args = append(args, f)
 	}
-	return true, nil
+
+	res, err := recordScript.Run(ctx, v.client, keys, args...).Int64()
+	if err != nil {
+		return false, fmt.Errorf("store: record %s: %w", scope, err)
+	}
+	return res == 1, nil
 }
 
 // Remediation reads every tracked scope's cumulative histogram for emission.
