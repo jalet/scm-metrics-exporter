@@ -18,10 +18,12 @@ import (
 
 	"github.com/jalet/scm-metrics-exporter/internal/collector"
 	"github.com/jalet/scm-metrics-exporter/internal/config"
+	"github.com/jalet/scm-metrics-exporter/internal/lifecycle"
 	"github.com/jalet/scm-metrics-exporter/internal/metrics"
 	"github.com/jalet/scm-metrics-exporter/internal/provider"
 	providergithub "github.com/jalet/scm-metrics-exporter/internal/provider/github"
 	providergitlab "github.com/jalet/scm-metrics-exporter/internal/provider/gitlab"
+	"github.com/jalet/scm-metrics-exporter/internal/store"
 )
 
 // Build metadata, populated via -ldflags "-X main.version=...".
@@ -67,10 +69,21 @@ func run(ctx context.Context, providerName string, once bool, repo string) error
 
 	coll := collector.New(collector.Entry{Provider: prov, Target: cfg.Target(), Repo: repo})
 
+	var remediation metrics.RemediationReader
+	var lcStore *store.Valkey
+	if cfg.Lifecycle.Enabled {
+		lcStore, err = store.NewValkey(store.Options{Addr: cfg.Lifecycle.ValkeyAddr, Password: cfg.Lifecycle.ValkeyPassword})
+		if err != nil {
+			return err
+		}
+		defer func() { _ = lcStore.Close() }()
+		remediation = lcStore
+	}
+
 	mp, recordScrapeErr, err := metrics.Setup(ctx, coll, version, metrics.Dimensions{
 		Ecosystem: cfg.Dimensions.Ecosystem,
 		Tool:      cfg.Dimensions.Tool,
-	}, nil)
+	}, remediation)
 	if err != nil {
 		return err
 	}
@@ -95,7 +108,16 @@ func run(ctx context.Context, providerName string, once bool, repo string) error
 		// snapshot over OTLP and stops the reader (a single export -- no separate
 		// ForceFlush). A hard whole-provider failure returns an error (exit 1); a partial
 		// snapshot (recorded scrape errors) returns nil (exit 0).
-		return coll.PollOnce(ctx, recordScrapeErr)
+		perr := coll.PollOnce(ctx, recordScrapeErr)
+		if lcStore != nil {
+			if snap, ok := coll.Latest(prov.Name()); ok {
+				if rerr := lifecycle.Record(ctx, lcStore, prov.Name(), snap, cfg.Lifecycle.ResolutionWindow); rerr != nil {
+					zlog.Warn().Err(rerr).Msg("recording resolved findings")
+					recordScrapeErr(prov.Name(), provider.SourceLifecycle)
+				}
+			}
+		}
+		return perr
 	}
 
 	// Blocks until a signal cancels ctx; the periodic OTLP/console reader is stopped by
@@ -116,6 +138,8 @@ func buildProvider(cfg config.Config, repo string) (provider.Provider, error) {
 			CodeScanningTool:  cfg.GitHub.CodeScanningTool,
 			CollectWorkflows:  cfg.GitHub.CollectWorkflows,
 			WorkflowLookback:  cfg.GitHub.WorkflowLookback,
+			CollectLifecycle:  cfg.Lifecycle.Enabled,
+			ResolutionWindow:  cfg.Lifecycle.ResolutionWindow,
 		})
 		if err != nil {
 			return nil, err
@@ -128,6 +152,8 @@ func buildProvider(cfg config.Config, repo string) (provider.Provider, error) {
 			BaseURL:          cfg.GitLab.BaseURL,
 			CollectWorkflows: cfg.GitLab.CollectWorkflows,
 			WorkflowLookback: cfg.GitLab.WorkflowLookback,
+			CollectLifecycle: cfg.Lifecycle.Enabled,
+			ResolutionWindow: cfg.Lifecycle.ResolutionWindow,
 		})
 		if err != nil {
 			return nil, err
