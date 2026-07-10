@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.6.1...v0.7.0) (2026-07-10)
+
+
+### Features
+
+* **chart:** add optional operator ServiceMonitor ([#36](https://github.com/jalet/scm-metrics-exporter/issues/36)) ([3e05267](https://github.com/jalet/scm-metrics-exporter/commit/3e05267a0a98094ed91aeeb1e3daf51acd09a476))
+* pause dispatch when SCM rate-limit budget is low ([#35](https://github.com/jalet/scm-metrics-exporter/issues/35)) ([7a1082d](https://github.com/jalet/scm-metrics-exporter/commit/7a1082d6e5dce02c3e88f0c21ba2666ad9c3c094))
+
 ## [0.6.1](https://github.com/jalet/scm-metrics-exporter/compare/v0.6.0...v0.6.1) (2026-07-10)
 
 
