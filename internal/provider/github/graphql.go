@@ -27,7 +27,7 @@ const ownerMetricsQuery = `query OwnerMetrics($login: String!, $cursor: String) 
         isArchived
         visibility
         hasVulnerabilityAlertsEnabled
-        defaultBranchRef { branchProtectionRule { id } }
+        defaultBranchRef { branchProtectionRule { id } rules(first: 1) { totalCount } }
         pullRequests(states: OPEN) { totalCount }
         vulnerabilityAlerts(states: OPEN, first: 100) {
           nodes { securityVulnerability { severity package { ecosystem } } }
@@ -47,7 +47,7 @@ const repoMetricsQuery = `query RepoMetrics($owner: String!, $name: String!) {
     isArchived
     visibility
     hasVulnerabilityAlertsEnabled
-    defaultBranchRef { branchProtectionRule { id } }
+    defaultBranchRef { branchProtectionRule { id } rules(first: 1) { totalCount } }
     pullRequests(states: OPEN) { totalCount }
     vulnerabilityAlerts(states: OPEN, first: 100) {
       nodes { securityVulnerability { severity package { ecosystem } } }
@@ -72,6 +72,9 @@ type repoNode struct {
 		BranchProtectionRule *struct {
 			ID string `json:"id"`
 		} `json:"branchProtectionRule"`
+		Rules struct {
+			TotalCount int `json:"totalCount"`
+		} `json:"rules"`
 	} `json:"defaultBranchRef"`
 	PullRequests struct {
 		TotalCount int `json:"totalCount"`
@@ -262,7 +265,8 @@ func mapRepoNode(n repoNode) graphqlRepo {
 		Visibility:        strings.ToLower(n.Visibility),
 		Archived:          n.IsArchived,
 		DependabotEnabled: n.HasVulnerabilityAlertsEnabled,
-		BranchProtected:   n.DefaultBranchRef != nil && n.DefaultBranchRef.BranchProtectionRule != nil,
+		BranchProtected: n.DefaultBranchRef != nil &&
+			(n.DefaultBranchRef.BranchProtectionRule != nil || n.DefaultBranchRef.Rules.TotalCount > 0),
 	}
 	for _, a := range n.VulnerabilityAlerts.Nodes {
 		repo.findings = append(repo.findings, provider.Finding{

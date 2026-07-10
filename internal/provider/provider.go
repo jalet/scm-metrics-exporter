@@ -129,7 +129,8 @@ type RepoPosture struct {
 	// DependabotEnabled reports whether automated dependency-vulnerability alerting is
 	// enabled: GitHub Dependabot alerts, or GitLab dependency scanning.
 	DependabotEnabled bool
-	// BranchProtected reports whether the default branch has a branch-protection rule.
+	// BranchProtected reports whether the default branch is protected by a classic
+	// branch-protection rule or by an active repository ruleset.
 	BranchProtected bool
 }
 

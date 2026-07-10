@@ -50,7 +50,8 @@ package ecosystem) and `tool` (scanning tool) labels are added to
 `scm_repo_info` is a constant `1` carrying each repository's security posture on its
 labels (the info-metric pattern; join it against the other series by `provider,repo`).
 `visibility` is `public`/`private`/`internal`, `branch_protected` means the default
-branch has a protection rule, and `dependabot_enabled` means automated
+branch is protected by a classic branch-protection rule or an active repository ruleset,
+and `dependabot_enabled` means automated
 dependency-vulnerability alerting is on (GitHub Dependabot alerts, or GitLab dependency
 scanning). Some fields are admin-gated, so a token without the required access may report
 them as `false`.
