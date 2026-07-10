@@ -477,14 +477,24 @@ func TestMapGraphQLPosture(t *testing.T) {
 		t.Errorf("posture = %+v, want private/archived/dependabot/branch-protected all set", *p)
 	}
 
-	// No branch-protection rule -> BranchProtected false; visibility lowercased.
-	unprotected := `{"data":{"repositoryOwner":{"repositories":{"nodes":[{"name":"b","visibility":"PUBLIC","defaultBranchRef":{"branchProtectionRule":null},"pullRequests":{"totalCount":0}}]}}}}`
+	// No classic rule and no ruleset -> BranchProtected false; visibility lowercased.
+	unprotected := `{"data":{"repositoryOwner":{"repositories":{"nodes":[{"name":"b","visibility":"PUBLIC","defaultBranchRef":{"branchProtectionRule":null,"rules":{"totalCount":0}},"pullRequests":{"totalCount":0}}]}}}}`
 	var gr2 graphqlResponse
 	if err := json.Unmarshal([]byte(unprotected), &gr2); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if p := mapGraphQLRepos(&gr2)[0].posture; p.BranchProtected || p.Visibility != "public" {
 		t.Errorf("posture = %+v, want branch_protected=false visibility=public", *p)
+	}
+
+	// No classic rule but an active ruleset (rules.totalCount > 0) -> BranchProtected true.
+	rulesetProtected := `{"data":{"repositoryOwner":{"repositories":{"nodes":[{"name":"c","visibility":"PRIVATE","defaultBranchRef":{"branchProtectionRule":null,"rules":{"totalCount":3}},"pullRequests":{"totalCount":0}}]}}}}`
+	var gr3 graphqlResponse
+	if err := json.Unmarshal([]byte(rulesetProtected), &gr3); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p := mapGraphQLRepos(&gr3)[0].posture; !p.BranchProtected {
+		t.Errorf("posture = %+v, want branch_protected=true for ruleset-based protection", *p)
 	}
 }
 
