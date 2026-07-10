@@ -73,12 +73,32 @@ crds:
   enabled: true
   keep: true
 
-# The operator's own controller-runtime metrics endpoint. Exposed on the pod for local
-# inspection; not scraped by a chart-managed Service (the product is OTLP-push only). Set
-# bindAddress to "0" to disable.
+# The operator's own controller-runtime metrics endpoint. Exposed on the pod; scraped only
+# when operator.serviceMonitor is enabled (the product's own metrics are OTLP-push). Set
+# bindAddress to "0" to disable the endpoint entirely.
 metrics:
   bindAddress: ":8080"
   port: 8080
+
+# operator groups settings for the operator's own observability.
+operator:
+  # serviceMonitor creates a Prometheus Operator ServiceMonitor (plus a backing ClusterIP
+  # Service) for the operator's controller-runtime metrics (plain HTTP on metrics.port). It
+  # renders only when enabled AND the cluster has the Prometheus Operator CRD
+  # (monitoring.coreos.com/v1), so leaving it enabled on a cluster without Prometheus
+  # Operator is a no-op rather than an install failure.
+  serviceMonitor:
+    enabled: true
+    # interval and scrapeTimeout are optional; empty uses the Prometheus defaults.
+    interval: ""
+    scrapeTimeout: ""
+    # labels adds extra labels to the ServiceMonitor object, for a Prometheus's
+    # serviceMonitorSelector to match on.
+    labels: {}
+    # relabelings and metricRelabelings are Prometheus RelabelConfig lists applied to the
+    # scrape and to scraped samples, respectively.
+    relabelings: []
+    metricRelabelings: []
 
 valkey:
   # deploy a bundled single-replica Valkey for lifecycle dedup state; set false (the

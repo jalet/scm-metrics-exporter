@@ -179,7 +179,8 @@ Useful values (see `charts/scm-metrics-exporter/values.yaml` for the full set):
 | `exporterImage.repository` | (operator image) | Image injected into the collection Jobs. |
 | `replicaCount` / `leaderElection.enabled` | `1` / `true` | HA via leader election. |
 | `crds.enabled` / `crds.keep` | `true` / `true` | Manage CRDs; keep them on uninstall. |
-| `metrics.bindAddress` | `:8080` | Operator's own controller-runtime metrics port (not scraped by the chart; set `0` to disable). |
+| `metrics.bindAddress` | `:8080` | Operator's own controller-runtime metrics port (set `0` to disable the endpoint). |
+| `operator.serviceMonitor.enabled` | `true` | Create a Prometheus Operator ServiceMonitor (plus a metrics Service) for the operator's metrics. Renders only when the `monitoring.coreos.com/v1` CRD is present, so it is a no-op on clusters without Prometheus Operator. |
 | `watchNamespaces` | (all) | Reserved for namespaced mode. |
 
 ## Custom resource examples

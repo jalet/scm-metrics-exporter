@@ -1,0 +1,59 @@
+{{- if and .Values.operator.serviceMonitor.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+# Metrics Service and ServiceMonitor for the operator's own controller-runtime metrics.
+# Both are gated on operator.serviceMonitor.enabled and on the Prometheus Operator CRD being
+# present, so a default-enabled install on a cluster without Prometheus Operator is a no-op.
+# The ServiceMonitor selects the operator's Services by label; scoping the endpoint to the
+# "metrics" port means the webhook Service (same labels, no metrics port) yields no target.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "scm-metrics-exporter.fullname" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "scm-metrics-exporter.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "scm-metrics-exporter.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "scm-metrics-exporter.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "scm-metrics-exporter.labels" . | nindent 4 }}
+    {{- with .Values.operator.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "scm-metrics-exporter.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      scheme: http
+      {{- with .Values.operator.serviceMonitor.interval }}
+      interval: {{ . }}
+      {{- end }}
+      {{- with .Values.operator.serviceMonitor.scrapeTimeout }}
+      scrapeTimeout: {{ . }}
+      {{- end }}
+      {{- with .Values.operator.serviceMonitor.relabelings }}
+      relabelings:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.operator.serviceMonitor.metricRelabelings }}
+      metricRelabelings:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
