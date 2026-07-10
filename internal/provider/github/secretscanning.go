@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"time"
 
 	gh "github.com/google/go-github/v89/github"
 	zlog "github.com/rs/zerolog/log"
@@ -49,7 +50,7 @@ func (p *Provider) collectSecretScanningForOrg(ctx context.Context, org string) 
 			if repo == "" {
 				continue
 			}
-			res.findings[repo] = append(res.findings[repo], secretFinding())
+			res.findings[repo] = append(res.findings[repo], secretFinding(a.GetCreatedAt().Time))
 		}
 		total += len(alerts)
 		zlog.Debug().Str("provider", "github").Str("source", "secret_scanning").Str("owner", org).
@@ -119,8 +120,8 @@ func (p *Provider) secretScanningForRepo(ctx context.Context, owner, repo string
 			}
 			return findings, rate, rateKnown, false, e
 		}
-		for range alerts {
-			findings = append(findings, secretFinding())
+		for _, a := range alerts {
+			findings = append(findings, secretFinding(a.GetCreatedAt().Time))
 		}
 		if resp == nil || resp.NextPage == 0 {
 			return findings, rate, rateKnown, true, nil
@@ -131,7 +132,8 @@ func (p *Provider) secretScanningForRepo(ctx context.Context, owner, repo string
 }
 
 // secretFinding is the finding for one open secret-scanning alert. GitHub reports no
-// severity for these, so the severity is SeverityUnknown.
-func secretFinding() provider.Finding {
-	return provider.Finding{Severity: provider.SeverityUnknown, Category: provider.CategorySecret}
+// severity for these, so the severity is SeverityUnknown. createdAt is the alert's creation
+// time, feeding the open-age histogram.
+func secretFinding(createdAt time.Time) provider.Finding {
+	return provider.Finding{Severity: provider.SeverityUnknown, Category: provider.CategorySecret, CreatedAt: createdAt}
 }

@@ -14,11 +14,11 @@ import (
 
 const (
 	projectVulnsJSON = `{"data":{"project":{"vulnerabilities":{"pageInfo":{"hasNextPage":false},"nodes":[
-		{"severity":"HIGH","reportType":"DEPENDENCY_SCANNING","scanner":{"name":"gemnasium"}},
-		{"severity":"CRITICAL","reportType":"SAST","scanner":{"name":"semgrep"}}
+		{"severity":"HIGH","reportType":"DEPENDENCY_SCANNING","scanner":{"name":"gemnasium"},"detectedAt":"2024-01-02T03:04:05Z"},
+		{"severity":"CRITICAL","reportType":"SAST","scanner":{"name":"semgrep"},"detectedAt":"2024-01-02T03:04:05Z"}
 	]}}}}`
 	projectPostureJSON = `{"data":{"project":{"visibility":"private","archived":false,
-		"securityScanners":{"enabled":["SAST","DEPENDENCY_SCANNING"]},
+		"securityScanners":{"enabled":["SAST","DEPENDENCY_SCANNING","SECRET_DETECTION"]},
 		"branchRules":{"nodes":[{"isDefault":true,"isProtected":true}]}}}}`
 )
 
@@ -52,10 +52,10 @@ func TestSnapshotRepo(t *testing.T) {
 		Repos: []provider.RepoMetrics{{
 			Name:            "acme/svc",
 			OpenReviewItems: 3,
-			Posture:         &provider.RepoPosture{Visibility: "private", DependabotEnabled: true, BranchProtected: true},
+			Posture:         &provider.RepoPosture{Visibility: "private", DependabotEnabled: true, BranchProtected: true, SecretScanningEnabled: true},
 			Findings: []provider.Finding{
-				{Severity: "high", Category: "dependency", Tool: "gemnasium"},
-				{Severity: "critical", Category: "static_analysis", Tool: "semgrep"},
+				{Severity: "high", Category: "dependency", Tool: "gemnasium", CreatedAt: parseGitLabTime("2024-01-02T03:04:05Z")},
+				{Severity: "critical", Category: "static_analysis", Tool: "semgrep", CreatedAt: parseGitLabTime("2024-01-02T03:04:05Z")},
 			},
 		}},
 		RateLimits: []provider.RateLimit{

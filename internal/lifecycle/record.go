@@ -25,7 +25,12 @@ type RecordStore interface {
 // before the window but resolved within it is a real, slow remediation and belongs in the
 // +Inf bucket. Store errors are joined and returned; a returned error is non-fatal to the
 // caller (recorded as a lifecycle source error).
-func Record(ctx context.Context, st RecordStore, providerName string, snap provider.Snapshot, window time.Duration) error {
+//
+// includeSeverity adds the finding's severity as the scope's fifth field when the severity
+// finding-dimension is enabled; otherwise the field is empty. Changing it changes the scope
+// key, so the pre-existing per-scope counters restart from zero once (benign; rate() tolerates
+// the reset).
+func Record(ctx context.Context, st RecordStore, providerName string, snap provider.Snapshot, window time.Duration, includeSeverity bool) error {
 	var errs []error
 	for _, repo := range snap.Repos {
 		for _, rf := range repo.ResolvedFindings {
@@ -36,7 +41,11 @@ func Record(ctx context.Context, st RecordStore, providerName string, snap provi
 			if duration <= 0 {
 				continue
 			}
-			scope := provider.RemediationScope(providerName, repo.Name, rf.Category, rf.Resolution)
+			severity := ""
+			if includeSeverity {
+				severity = rf.Severity
+			}
+			scope := provider.RemediationScope(providerName, repo.Name, rf.Category, rf.Resolution, severity)
 			if _, err := st.RecordIfNew(ctx, scope, rf.ID, duration, window); err != nil {
 				errs = append(errs, err)
 			}

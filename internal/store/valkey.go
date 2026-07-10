@@ -115,11 +115,11 @@ func (v *Valkey) Remediation(ctx context.Context) ([]provider.RemediationSeries,
 			continue
 		}
 		scope := hk[len("hist:"):]
-		p, repo, cat, res, ok := provider.ParseRemediationScope(scope)
+		p, repo, cat, res, sev, ok := provider.ParseRemediationScope(scope)
 		if !ok {
 			continue // skip an unparseable key rather than fail the whole read
 		}
-		s := provider.RemediationSeries{Provider: p, Repo: repo, Category: cat, Resolution: res}
+		s := provider.RemediationSeries{Provider: p, Repo: repo, Category: cat, Resolution: res, Severity: sev}
 		for _, le := range provider.RemediationBucketBounds {
 			s.Buckets = append(s.Buckets, provider.RemediationBucket{LE: le, Count: parseInt(fields[bucketField(le)])})
 		}

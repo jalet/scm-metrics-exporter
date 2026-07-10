@@ -29,16 +29,41 @@ func TestRecordEmitsScopedDurations(t *testing.T) {
 		}},
 	}}}
 	fs := &fakeStore{}
-	if err := Record(context.Background(), fs, "github", snap, 90*24*time.Hour); err != nil {
+	if err := Record(context.Background(), fs, "github", snap, 90*24*time.Hour, false); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
 	if len(fs.calls) != 1 {
 		t.Fatalf("calls=%d, want 1", len(fs.calls))
 	}
 	got := fs.calls[0]
-	wantScope := provider.RemediationScope("github", "acme/svc", provider.CategoryDependency, provider.ResolutionFixed)
+	// includeSeverity=false -> the fifth scope field is empty.
+	wantScope := provider.RemediationScope("github", "acme/svc", provider.CategoryDependency, provider.ResolutionFixed, "")
 	if got.scope != wantScope || got.id != "da-1" || got.duration != 2*time.Hour {
 		t.Fatalf("call = %+v, want scope=%q id=da-1 duration=2h", got, wantScope)
+	}
+}
+
+// TestRecordIncludesSeverityWhenEnabled proves the severity component is added to the scope
+// key only when includeSeverity is true (wired from the severity finding-dimension).
+func TestRecordIncludesSeverityWhenEnabled(t *testing.T) {
+	snap := provider.Snapshot{Repos: []provider.RepoMetrics{{
+		Name: "acme/svc",
+		ResolvedFindings: []provider.ResolvedFinding{{
+			ID: "da-1", Category: provider.CategoryDependency, Severity: provider.SeverityHigh,
+			Resolution: provider.ResolutionFixed,
+			CreatedAt:  time.Unix(1000, 0), ResolvedAt: time.Unix(1000+7200, 0),
+		}},
+	}}}
+	fs := &fakeStore{}
+	if err := Record(context.Background(), fs, "github", snap, 90*24*time.Hour, true); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if len(fs.calls) != 1 {
+		t.Fatalf("calls=%d, want 1", len(fs.calls))
+	}
+	wantScope := provider.RemediationScope("github", "acme/svc", provider.CategoryDependency, provider.ResolutionFixed, provider.SeverityHigh)
+	if fs.calls[0].scope != wantScope {
+		t.Fatalf("scope = %q, want %q (severity included when enabled)", fs.calls[0].scope, wantScope)
 	}
 }
 
@@ -63,7 +88,7 @@ func TestRecordSkipsBogusCreatedAt(t *testing.T) {
 		},
 	}}}
 	fs := &fakeStore{}
-	if err := Record(context.Background(), fs, "github", snap, window); err != nil {
+	if err := Record(context.Background(), fs, "github", snap, window, false); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
 	if len(fs.calls) != 1 {
@@ -90,7 +115,7 @@ func TestRecordKeepsSlowRemediationBeyondWindow(t *testing.T) {
 		}},
 	}}}
 	fs := &fakeStore{}
-	if err := Record(context.Background(), fs, "github", snap, window); err != nil {
+	if err := Record(context.Background(), fs, "github", snap, window, false); err != nil {
 		t.Fatalf("Record: %v", err)
 	}
 	if len(fs.calls) != 1 {

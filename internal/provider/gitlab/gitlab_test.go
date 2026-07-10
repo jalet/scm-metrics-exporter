@@ -264,7 +264,7 @@ func TestNewAuthSelection(t *testing.T) {
 func TestMapProjectPosture(t *testing.T) {
 	body := `{"data":{"group":{"projects":{"nodes":[
 		{"fullPath":"g/protected","visibility":"PRIVATE","archived":false,
-		 "securityScanners":{"enabled":["SAST","DEPENDENCY_SCANNING"]},
+		 "securityScanners":{"enabled":["SAST","DEPENDENCY_SCANNING","SECRET_DETECTION"]},
 		 "branchRules":{"nodes":[{"isDefault":true,"isProtected":true}]}},
 		{"fullPath":"g/loose","visibility":"public","archived":true,
 		 "securityScanners":{"enabled":["SAST"]},
@@ -279,7 +279,7 @@ func TestMapProjectPosture(t *testing.T) {
 	mapProjectPosture(&gr, got)
 
 	want := map[string]*provider.RepoPosture{
-		"g/protected": {Visibility: "private", Archived: false, DependabotEnabled: true, BranchProtected: true},
+		"g/protected": {Visibility: "private", Archived: false, DependabotEnabled: true, BranchProtected: true, SecretScanningEnabled: true},
 		// dependency scanning off; default-branch rule is not protected, protected rule is not default -> not protected.
 		"g/loose": {Visibility: "public", Archived: true, DependabotEnabled: false, BranchProtected: false},
 		// null securityScanners/branchRules must not panic and read as false.

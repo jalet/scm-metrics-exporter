@@ -77,10 +77,10 @@ func TestLoad(t *testing.T) {
 		},
 		{
 			name: "finding dimensions", provider: "github",
-			env: map[string]string{"GITHUB_ORG": "acme", "GITHUB_TOKEN": "ghp_x", "SCM_FINDING_DIMENSIONS": "ecosystem, tool"},
+			env: map[string]string{"GITHUB_ORG": "acme", "GITHUB_TOKEN": "ghp_x", "SCM_FINDING_DIMENSIONS": "ecosystem, tool, severity"},
 			check: func(t *testing.T, c Config) {
-				if !c.Dimensions.Ecosystem || !c.Dimensions.Tool {
-					t.Errorf("Dimensions = %+v, want both ecosystem and tool", c.Dimensions)
+				if !c.Dimensions.Ecosystem || !c.Dimensions.Tool || !c.Dimensions.Severity {
+					t.Errorf("Dimensions = %+v, want ecosystem, tool and severity", c.Dimensions)
 				}
 			},
 		},
@@ -88,8 +88,8 @@ func TestLoad(t *testing.T) {
 			name: "no finding dimensions by default", provider: "github",
 			env: map[string]string{"GITHUB_ORG": "acme", "GITHUB_TOKEN": "ghp_x"},
 			check: func(t *testing.T, c Config) {
-				if c.Dimensions.Ecosystem || c.Dimensions.Tool {
-					t.Errorf("Dimensions = %+v, want both off by default", c.Dimensions)
+				if c.Dimensions.Ecosystem || c.Dimensions.Tool || c.Dimensions.Severity {
+					t.Errorf("Dimensions = %+v, want all off by default", c.Dimensions)
 				}
 			},
 		},

@@ -26,7 +26,7 @@ const groupVulnsQuery = `query GroupVulns($fullPath: ID!, $after: String) {
       after: $after
     ) {
       pageInfo { hasNextPage endCursor }
-      nodes { severity reportType scanner { name } project { fullPath } }
+      nodes { severity reportType scanner { name } project { fullPath } detectedAt }
     }
   }
 }`
@@ -54,6 +54,11 @@ const groupProjectsQuery = `query GroupProjects($fullPath: ID!, $after: String) 
 // provider-neutral "dependency alerting enabled" posture bit (GitLab's analogue of
 // GitHub Dependabot alerts).
 const scannerDependencyScanning = "DEPENDENCY_SCANNING"
+
+// scannerSecretDetection is the securityScanners.enabled value that maps to the
+// provider-neutral "secret scanning enabled" posture bit (GitLab's analogue of GitHub
+// secret scanning).
+const scannerSecretDetection = "SECRET_DETECTION"
 
 // reportTypeCategory maps GitLab report types to our finding categories (aligned with
 // GitLab's own feature categories). Unmapped types (dast, api_fuzzing, coverage_fuzzing,
@@ -92,6 +97,7 @@ type vulnResponse struct {
 					Project struct {
 						FullPath string `json:"fullPath"`
 					} `json:"project"`
+					DetectedAt string `json:"detectedAt"`
 				} `json:"nodes"`
 			} `json:"vulnerabilities"`
 		} `json:"group"`
@@ -196,9 +202,10 @@ func mapVulnerabilities(gr *vulnResponse, into map[string][]provider.Finding) {
 			continue
 		}
 		into[n.Project.FullPath] = append(into[n.Project.FullPath], provider.Finding{
-			Severity: provider.NormalizeSeverity(n.Severity),
-			Category: cat,
-			Tool:     n.Scanner.Name,
+			Severity:  provider.NormalizeSeverity(n.Severity),
+			Category:  cat,
+			Tool:      n.Scanner.Name,
+			CreatedAt: parseGitLabTime(n.DetectedAt),
 		})
 	}
 }
@@ -309,7 +316,9 @@ func mapProjectPosture(gr *projectsResponse, into map[string]*provider.RepoPostu
 			for _, s := range n.SecurityScanners.Enabled {
 				if strings.EqualFold(s, scannerDependencyScanning) {
 					ps.DependabotEnabled = true
-					break
+				}
+				if strings.EqualFold(s, scannerSecretDetection) {
+					ps.SecretScanningEnabled = true
 				}
 			}
 		}

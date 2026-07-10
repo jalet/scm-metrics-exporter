@@ -132,6 +132,10 @@ type RepoPosture struct {
 	// BranchProtected reports whether the default branch is protected by a classic
 	// branch-protection rule or by an active repository ruleset.
 	BranchProtected bool
+	// SecretScanningEnabled reports whether secret scanning is enabled: GitHub
+	// secret-scanning (security_and_analysis), or GitLab SECRET_DETECTION. Admin-gated on
+	// GitHub, so a token without the required access may report it as false.
+	SecretScanningEnabled bool
 }
 
 // Finding is a single open security finding.
@@ -149,6 +153,10 @@ type Finding struct {
 	// GitLab scanner); empty when unknown. Emitted as the optional "tool" metric label
 	// only when that dimension is enabled.
 	Tool string
+	// CreatedAt is when the finding was first opened (the alert/vulnerability creation
+	// time). It feeds the open-age histogram (scm.finding_open_age_seconds); a finding
+	// with a zero CreatedAt is excluded from that histogram.
+	CreatedAt time.Time
 }
 
 // ResolvedFinding is a security finding that has left the open state (fixed or dismissed)
@@ -239,9 +247,12 @@ type RemediationSeries struct {
 	Repo       string
 	Category   string
 	Resolution string
-	Buckets    []RemediationBucket
-	Sum        float64
-	Count      int64
+	// Severity is the finding severity when the severity finding-dimension is enabled,
+	// else the empty string. Emitted as the optional "severity" label only when non-empty.
+	Severity string
+	Buckets  []RemediationBucket
+	Sum      float64
+	Count    int64
 }
 
 // RemediationBucketBounds are the finite histogram upper bounds in seconds (1h..90d). The
@@ -250,23 +261,27 @@ type RemediationSeries struct {
 var RemediationBucketBounds = []float64{3600, 21600, 86400, 259200, 604800, 1209600, 2592000, 7776000}
 
 // remediationScopeSep joins the scope label tuple. The unit separator never appears in a
-// repository path or the fixed provider/category/resolution enums, so the join is reversible.
+// repository path or the fixed provider/category/resolution/severity enums, so the join is
+// reversible.
 const remediationScopeSep = "\x1f"
 
 // RemediationScope encodes the histogram label tuple into a single scope key used by the
-// remediation store.
-func RemediationScope(providerName, repo, category, resolution string) string {
-	return strings.Join([]string{providerName, repo, category, resolution}, remediationScopeSep)
+// remediation store. severity is the finding's normalized severity when the severity
+// finding-dimension is enabled, else the empty string; either way it is a fixed fifth field
+// so the encoding round-trips.
+func RemediationScope(providerName, repo, category, resolution, severity string) string {
+	return strings.Join([]string{providerName, repo, category, resolution, severity}, remediationScopeSep)
 }
 
 // ParseRemediationScope reverses RemediationScope, returning ok=false for any string that is
-// not exactly four separator-joined fields.
-func ParseRemediationScope(scope string) (providerName, repo, category, resolution string, ok bool) {
+// not exactly five separator-joined fields. severity is the empty string when the severity
+// dimension was off at record time.
+func ParseRemediationScope(scope string) (providerName, repo, category, resolution, severity string, ok bool) {
 	parts := strings.Split(scope, remediationScopeSep)
-	if len(parts) != 4 {
-		return "", "", "", "", false
+	if len(parts) != 5 {
+		return "", "", "", "", "", false
 	}
-	return parts[0], parts[1], parts[2], parts[3], true
+	return parts[0], parts[1], parts[2], parts[3], parts[4], true
 }
 
 // API resources, emitted on the "resource" attribute of

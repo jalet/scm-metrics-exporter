@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	zlog "github.com/rs/zerolog/log"
 
@@ -30,7 +31,7 @@ const ownerMetricsQuery = `query OwnerMetrics($login: String!, $cursor: String) 
         defaultBranchRef { branchProtectionRule { id } rules(first: 1) { totalCount } }
         pullRequests(states: OPEN) { totalCount }
         vulnerabilityAlerts(states: OPEN, first: 100) {
-          nodes { securityVulnerability { severity package { ecosystem } } }
+          nodes { createdAt securityVulnerability { severity package { ecosystem } } }
         }
       }
     }
@@ -50,7 +51,7 @@ const repoMetricsQuery = `query RepoMetrics($owner: String!, $name: String!) {
     defaultBranchRef { branchProtectionRule { id } rules(first: 1) { totalCount } }
     pullRequests(states: OPEN) { totalCount }
     vulnerabilityAlerts(states: OPEN, first: 100) {
-      nodes { securityVulnerability { severity package { ecosystem } } }
+      nodes { createdAt securityVulnerability { severity package { ecosystem } } }
     }
   }
   rateLimit { remaining }
@@ -81,6 +82,7 @@ type repoNode struct {
 	} `json:"pullRequests"`
 	VulnerabilityAlerts struct {
 		Nodes []struct {
+			CreatedAt             string `json:"createdAt"`
 			SecurityVulnerability struct {
 				Severity string `json:"severity"`
 				Package  struct {
@@ -273,9 +275,23 @@ func mapRepoNode(n repoNode) graphqlRepo {
 			Severity:  provider.NormalizeSeverity(a.SecurityVulnerability.Severity),
 			Category:  provider.CategoryDependency,
 			Ecosystem: strings.ToLower(a.SecurityVulnerability.Package.Ecosystem),
+			CreatedAt: parseGraphQLTime(a.CreatedAt),
 		})
 	}
 	return repo
+}
+
+// parseGraphQLTime parses a GitHub GraphQL DateTime (RFC3339). An empty or unparseable
+// value yields the zero time, which the open-age histogram excludes.
+func parseGraphQLTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
 
 func graphqlErrorsErr(errs []graphqlError) error {

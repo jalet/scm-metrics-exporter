@@ -20,7 +20,7 @@ These fields are present on both `GitHubMetricsExporter` and `GitLabMetricsExpor
 | `export.otlpEndpoint` | string | (required) | OTLP metrics endpoint the Jobs push to. Ephemeral Jobs cannot be scraped, so this is mandatory. |
 | `autoDiscover.include` | RepoFilter | (empty = all) | Candidate repositories to collect. |
 | `autoDiscover.exclude` | RepoFilter | (empty = none) | Repositories removed from the include set. |
-| `findingDimensions` | `[]string` (enum `ecosystem`\|`tool`) | none | Optional extra labels on `scm_security_findings_open`. Off by default (raises cardinality). |
+| `findingDimensions` | `[]string` (enum `ecosystem`\|`tool`\|`severity`) | none | Optional extra labels: `ecosystem`/`tool` on `scm_security_findings_open`, `severity` on the remediation histogram. Off by default (raises cardinality). |
 | `collectWorkflows` | boolean | `false` | Collect recent CI-run metrics (`scm_workflow_runs_recent`): GitHub Actions runs or GitLab pipelines. Opt-in (adds an API call per repo + cardinality). |
 | `workflowLookback` | duration string | `168h` | How far back to count CI runs (used when `collectWorkflows: true`). |
 | `credentialsSecret.name` | string | (required) | Secret in the CR namespace holding the credentials. |

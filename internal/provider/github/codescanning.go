@@ -165,9 +165,10 @@ func (p *Provider) listUserRepos(ctx context.Context, user string) (repos []stri
 
 func codeScanningFinding(a *gh.Alert) provider.Finding {
 	return provider.Finding{
-		Severity: provider.NormalizeSeverity(codeScanningSeverity(a)),
-		Category: provider.CategoryStaticAnalysis,
-		Tool:     a.GetTool().GetName(),
+		Severity:  provider.NormalizeSeverity(codeScanningSeverity(a)),
+		Category:  provider.CategoryStaticAnalysis,
+		Tool:      a.GetTool().GetName(),
+		CreatedAt: a.GetCreatedAt().Time,
 	}
 }
 

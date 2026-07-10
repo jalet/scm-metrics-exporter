@@ -14,8 +14,10 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
+	gh "github.com/google/go-github/v89/github"
 
 	"github.com/jalet/scm-metrics-exporter/internal/provider"
 )
@@ -303,6 +305,9 @@ func TestSnapshotRepo(t *testing.T) {
 		case r.URL.Path == "/repos/acme/widget/secret-scanning/alerts":
 			w.Header().Set("X-RateLimit-Remaining", "4988")
 			_, _ = w.Write([]byte(`[{}]`))
+		case r.URL.Path == "/repos/acme/widget":
+			// Repositories.Get for the secret-scanning posture bit.
+			_, _ = w.Write([]byte(`{"security_and_analysis":{"secret_scanning":{"status":"enabled"}}}`))
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -318,7 +323,7 @@ func TestSnapshotRepo(t *testing.T) {
 		Repos: []provider.RepoMetrics{{
 			Name:            "widget",
 			OpenReviewItems: 4,
-			Posture:         &provider.RepoPosture{Visibility: "private", DependabotEnabled: true, BranchProtected: true},
+			Posture:         &provider.RepoPosture{Visibility: "private", DependabotEnabled: true, BranchProtected: true, SecretScanningEnabled: true},
 			Findings: []provider.Finding{
 				{Severity: "high", Category: "dependency", Ecosystem: "npm"},
 				{Severity: "unknown", Category: "secret"},
@@ -353,6 +358,8 @@ func TestSnapshotRepoWorkflows(t *testing.T) {
 				{"name":"release","conclusion":"success"},
 				{"name":"lint","status":"in_progress","conclusion":null}
 			]}`))
+		case r.URL.Path == "/repos/acme/widget":
+			_, _ = w.Write([]byte(`{}`)) // secret-scanning posture read (disabled)
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -460,6 +467,40 @@ func TestMapGraphQLEcosystem(t *testing.T) {
 	}
 	if f := repos[0].findings[0]; f.Ecosystem != "npm" || f.Category != provider.CategoryDependency {
 		t.Errorf("finding = %+v, want ecosystem=npm (lowercased) category=dependency", f)
+	}
+}
+
+func TestMapGraphQLDependabotCreatedAt(t *testing.T) {
+	body := `{"data":{"repositoryOwner":{"repositories":{"nodes":[{"name":"a","pullRequests":{"totalCount":0},"vulnerabilityAlerts":{"nodes":[{"createdAt":"2024-01-02T03:04:05Z","securityVulnerability":{"severity":"HIGH","package":{"ecosystem":"NPM"}}}]}}]}}}}`
+	var gr graphqlResponse
+	if err := json.Unmarshal([]byte(body), &gr); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	repos := mapGraphQLRepos(&gr)
+	if len(repos) != 1 || len(repos[0].findings) != 1 {
+		t.Fatalf("repos = %+v, want one repo with one finding", repos)
+	}
+	want := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	if got := repos[0].findings[0].CreatedAt; !got.Equal(want) {
+		t.Errorf("open Dependabot finding CreatedAt = %v, want %v", got, want)
+	}
+}
+
+func TestCodeScanningFindingCreatedAt(t *testing.T) {
+	created := time.Date(2024, 5, 6, 7, 8, 9, 0, time.UTC)
+	a := &gh.Alert{
+		CreatedAt: &gh.Timestamp{Time: created},
+		Rule:      &gh.Rule{SecuritySeverityLevel: gh.Ptr("high")},
+	}
+	if got := codeScanningFinding(a).CreatedAt; !got.Equal(created) {
+		t.Errorf("code-scanning finding CreatedAt = %v, want %v", got, created)
+	}
+}
+
+func TestSecretFindingCreatedAt(t *testing.T) {
+	created := time.Date(2024, 5, 6, 7, 8, 9, 0, time.UTC)
+	if got := secretFinding(created).CreatedAt; !got.Equal(created) {
+		t.Errorf("secret finding CreatedAt = %v, want %v", got, created)
 	}
 }
 
