@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.5.0...v0.6.0) (2026-07-10)
+
+
+### Features
+
+* close deferred metrics (severity, open-age, secret-scanning posture) ([#32](https://github.com/jalet/scm-metrics-exporter/issues/32)) ([f18f86b](https://github.com/jalet/scm-metrics-exporter/commit/f18f86b9f254f279ef9861dc8244911569d27b34))
+
+
+### Bug Fixes
+
+* **github:** detect ruleset-based default-branch protection ([#30](https://github.com/jalet/scm-metrics-exporter/issues/30)) ([eefad41](https://github.com/jalet/scm-metrics-exporter/commit/eefad412128b172a660a1b445225f3b1ff458c1c))
+
 ## [0.5.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.4.3...v0.5.0) (2026-07-09)
 
 
