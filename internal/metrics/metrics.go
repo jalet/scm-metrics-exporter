@@ -16,6 +16,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/otel"
@@ -46,27 +47,31 @@ const (
 	metricRemediationBucket  = "scm.finding_remediation_seconds.bucket"
 	metricRemediationSum     = "scm.finding_remediation_seconds.sum"
 	metricRemediationCount   = "scm.finding_remediation_seconds.count"
+	metricOpenAgeBucket      = "scm.finding_open_age_seconds.bucket"
+	metricOpenAgeSum         = "scm.finding_open_age_seconds.sum"
+	metricOpenAgeCount       = "scm.finding_open_age_seconds.count"
 )
 
 // Metric attribute keys.
 const (
-	attrProvider          = "provider"
-	attrRepo              = "repo"
-	attrSeverity          = "severity"
-	attrCategory          = "category"
-	attrResource          = "resource"
-	attrSource            = "source"
-	attrEcosystem         = "ecosystem"
-	attrTool              = "tool"
-	attrVisibility        = "visibility"
-	attrArchived          = "archived"
-	attrBranchProtected   = "branch_protected"
-	attrDependabotEnabled = "dependabot_enabled"
-	attrWorkflow          = "workflow"
-	attrConclusion        = "conclusion"
-	attrState             = "state"
-	attrLE                = "le"
-	attrResolution        = "resolution"
+	attrProvider              = "provider"
+	attrRepo                  = "repo"
+	attrSeverity              = "severity"
+	attrCategory              = "category"
+	attrResource              = "resource"
+	attrSource                = "source"
+	attrEcosystem             = "ecosystem"
+	attrTool                  = "tool"
+	attrVisibility            = "visibility"
+	attrArchived              = "archived"
+	attrBranchProtected       = "branch_protected"
+	attrDependabotEnabled     = "dependabot_enabled"
+	attrSecretScanningEnabled = "secret_scanning_enabled"
+	attrWorkflow              = "workflow"
+	attrConclusion            = "conclusion"
+	attrState                 = "state"
+	attrLE                    = "le"
+	attrResolution            = "resolution"
 )
 
 // SnapshotSource is the read side of the collector cache that the metrics callback
@@ -91,11 +96,13 @@ type RemediationReader interface {
 // observable-gauge callback (synchronous instruments only).
 type ScrapeErrorRecorder func(providerName, source string)
 
-// Dimensions selects optional finding labels on scm.security_findings.open. They default
-// off because ecosystem and tool multiply the series cardinality.
+// Dimensions selects optional finding labels. Ecosystem and Tool apply to
+// scm.security_findings.open; Severity applies to the remediation histogram (via the
+// recorded scope). They default off because each multiplies the series cardinality.
 type Dimensions struct {
 	Ecosystem bool
 	Tool      bool
+	Severity  bool
 }
 
 // Setup builds the metric reader from OTEL_METRICS_EXPORTER via autoexport, wires a
@@ -141,7 +148,7 @@ func Setup(ctx context.Context, src SnapshotSource, version string, dims Dimensi
 	)
 	otel.SetMeterProvider(mp)
 
-	record, err := register(mp.Meter(meterName, metric.WithInstrumentationVersion(version)), src, dims, remediation)
+	record, err := register(mp.Meter(meterName, metric.WithInstrumentationVersion(version)), src, dims, remediation, time.Now)
 	if err != nil {
 		_ = mp.Shutdown(ctx)
 		return nil, nil, err
@@ -153,7 +160,7 @@ func Setup(ctx context.Context, src SnapshotSource, version string, dims Dimensi
 // is non-nil, the remediation counters and their own callback), and returns a recorder
 // for the synchronous counter. It is separated from Setup so tests can drive it with a
 // ManualReader-backed meter.
-func register(meter metric.Meter, src SnapshotSource, dims Dimensions, remediation RemediationReader) (ScrapeErrorRecorder, error) {
+func register(meter metric.Meter, src SnapshotSource, dims Dimensions, remediation RemediationReader, now func() time.Time) (ScrapeErrorRecorder, error) {
 	reviewItems, err := meter.Int64ObservableGauge(metricReviewItemsOpen,
 		metric.WithDescription("Open review items (pull or merge requests) per repository."))
 	if err != nil {
@@ -184,6 +191,21 @@ func register(meter metric.Meter, src SnapshotSource, dims Dimensions, remediati
 	if err != nil {
 		return nil, fmt.Errorf("metrics: gauge %s: %w", metricFindingsByState, err)
 	}
+	openAgeBucket, err := meter.Int64ObservableGauge(metricOpenAgeBucket,
+		metric.WithDescription("Open findings with age <= le seconds, per repository and category (point-in-time gauge histogram, cumulative from below)."))
+	if err != nil {
+		return nil, fmt.Errorf("metrics: gauge %s: %w", metricOpenAgeBucket, err)
+	}
+	openAgeSum, err := meter.Float64ObservableGauge(metricOpenAgeSum,
+		metric.WithDescription("Total open age in seconds per repository and category (mean open age = sum / count)."))
+	if err != nil {
+		return nil, fmt.Errorf("metrics: gauge %s: %w", metricOpenAgeSum, err)
+	}
+	openAgeCount, err := meter.Int64ObservableGauge(metricOpenAgeCount,
+		metric.WithDescription("Total open findings per repository and category (denominator for the open-age histogram)."))
+	if err != nil {
+		return nil, fmt.Errorf("metrics: gauge %s: %w", metricOpenAgeCount, err)
+	}
 	scrapeErrors, err := meter.Int64Counter(metricScrapeErrors,
 		metric.WithDescription("Provider scrape errors, by source."))
 	if err != nil {
@@ -191,16 +213,18 @@ func register(meter metric.Meter, src SnapshotSource, dims Dimensions, remediati
 	}
 
 	callback := func(_ context.Context, o metric.Observer) error {
+		obsTime := now()
+		g := gauges{reviewItems, findings, rateLimit, repoInfo, workflowRuns, byState, openAgeBucket, openAgeSum, openAgeCount}
 		for _, name := range src.ProviderNames() {
 			snap, ok := src.Latest(name)
 			if !ok {
 				continue
 			}
-			observeSnapshot(o, name, snap, gauges{reviewItems, findings, rateLimit, repoInfo, workflowRuns, byState}, dims)
+			observeSnapshot(o, name, snap, g, dims, obsTime)
 		}
 		return nil
 	}
-	if _, err := meter.RegisterCallback(callback, reviewItems, findings, rateLimit, repoInfo, workflowRuns, byState); err != nil {
+	if _, err := meter.RegisterCallback(callback, reviewItems, findings, rateLimit, repoInfo, workflowRuns, byState, openAgeBucket, openAgeSum, openAgeCount); err != nil {
 		return nil, fmt.Errorf("metrics: register callback: %w", err)
 	}
 
@@ -231,6 +255,11 @@ func register(meter metric.Meter, src SnapshotSource, dims Dimensions, remediati
 					attribute.String(attrRepo, s.Repo),
 					attribute.String(attrCategory, s.Category),
 					attribute.String(attrResolution, s.Resolution),
+				}
+				// The severity label is emitted only when the recorded scope carried one
+				// (the severity finding-dimension was enabled at record time).
+				if s.Severity != "" {
+					base = append(base, attribute.String(attrSeverity, s.Severity))
 				}
 				for _, b := range s.Buckets {
 					o.ObserveInt64(bucket, b.Count, metric.WithAttributes(append(base, attribute.String(attrLE, formatLE(b.LE)))...))
@@ -265,17 +294,21 @@ type findingKey struct {
 // gauges bundles the observable gauges so observeSnapshot takes one parameter instead of a
 // long positional list.
 type gauges struct {
-	reviewItems  metric.Int64ObservableGauge
-	findings     metric.Int64ObservableGauge
-	rateLimit    metric.Int64ObservableGauge
-	repoInfo     metric.Int64ObservableGauge
-	workflowRuns metric.Int64ObservableGauge
-	byState      metric.Int64ObservableGauge
+	reviewItems   metric.Int64ObservableGauge
+	findings      metric.Int64ObservableGauge
+	rateLimit     metric.Int64ObservableGauge
+	repoInfo      metric.Int64ObservableGauge
+	workflowRuns  metric.Int64ObservableGauge
+	byState       metric.Int64ObservableGauge
+	openAgeBucket metric.Int64ObservableGauge
+	openAgeSum    metric.Float64ObservableGauge
+	openAgeCount  metric.Int64ObservableGauge
 }
 
 // observeSnapshot emits the per-provider gauges for one snapshot. dims selects the
-// optional ecosystem/tool finding labels.
-func observeSnapshot(o metric.Observer, name string, snap provider.Snapshot, g gauges, dims Dimensions) {
+// optional ecosystem/tool finding labels; now is the observation time used to age open
+// findings for the open-age histogram.
+func observeSnapshot(o metric.Observer, name string, snap provider.Snapshot, g gauges, dims Dimensions, now time.Time) {
 	for _, repo := range snap.Repos {
 		o.ObserveInt64(g.reviewItems, int64(repo.OpenReviewItems),
 			metric.WithAttributes(
@@ -291,6 +324,7 @@ func observeSnapshot(o metric.Observer, name string, snap provider.Snapshot, g g
 				attribute.String(attrArchived, strconv.FormatBool(p.Archived)),
 				attribute.String(attrBranchProtected, strconv.FormatBool(p.BranchProtected)),
 				attribute.String(attrDependabotEnabled, strconv.FormatBool(p.DependabotEnabled)),
+				attribute.String(attrSecretScanningEnabled, strconv.FormatBool(p.SecretScanningEnabled)),
 			))
 		}
 
@@ -347,6 +381,8 @@ func observeSnapshot(o metric.Observer, name string, snap provider.Snapshot, g g
 				attribute.String(attrState, parts[1]),
 			))
 		}
+
+		observeOpenAge(o, name, repo, g, now)
 	}
 
 	for _, rl := range snap.RateLimits {
@@ -355,6 +391,57 @@ func observeSnapshot(o metric.Observer, name string, snap provider.Snapshot, g g
 				attribute.String(attrProvider, name),
 				attribute.String(attrResource, rl.Resource),
 			))
+	}
+}
+
+// openAgeAcc accumulates one category's open-age histogram: cumulative-from-below bucket
+// counts over the shared bounds plus the +Inf overflow, the total count, and the age sum.
+type openAgeAcc struct {
+	buckets map[float64]int64
+	inf     int64
+	count   int64
+	sum     float64
+}
+
+// observeOpenAge emits the point-in-time open-age gauge histogram for one repository, per
+// finding category, aging each open finding against now. Findings with a zero CreatedAt are
+// excluded (a provider time-parse fallback would otherwise land a bogus multi-decade age).
+func observeOpenAge(o metric.Observer, name string, repo provider.RepoMetrics, g gauges, now time.Time) {
+	byCategory := make(map[string]*openAgeAcc)
+	for _, f := range repo.Findings {
+		if f.CreatedAt.IsZero() {
+			continue
+		}
+		acc := byCategory[f.Category]
+		if acc == nil {
+			acc = &openAgeAcc{buckets: make(map[float64]int64, len(provider.RemediationBucketBounds))}
+			byCategory[f.Category] = acc
+		}
+		age := now.Sub(f.CreatedAt).Seconds()
+		for _, le := range provider.RemediationBucketBounds {
+			if age <= le {
+				acc.buckets[le]++
+			}
+		}
+		acc.inf++
+		acc.count++
+		acc.sum += age
+	}
+
+	for category, acc := range byCategory {
+		base := []attribute.KeyValue{
+			attribute.String(attrProvider, name),
+			attribute.String(attrRepo, repo.Name),
+			attribute.String(attrCategory, category),
+		}
+		for _, le := range provider.RemediationBucketBounds {
+			o.ObserveInt64(g.openAgeBucket, acc.buckets[le],
+				metric.WithAttributes(append(base, attribute.String(attrLE, formatLE(le)))...))
+		}
+		o.ObserveInt64(g.openAgeBucket, acc.inf,
+			metric.WithAttributes(append(base, attribute.String(attrLE, formatLE(math.Inf(1))))...))
+		o.ObserveInt64(g.openAgeCount, acc.count, metric.WithAttributes(base...))
+		o.ObserveFloat64(g.openAgeSum, acc.sum, metric.WithAttributes(base...))
 	}
 }
 

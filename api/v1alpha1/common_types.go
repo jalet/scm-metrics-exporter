@@ -42,10 +42,10 @@ type ExporterSpec struct {
 	// +optional
 	AutoDiscover AutoDiscover `json:"autoDiscover,omitempty"`
 
-	// FindingDimensions adds optional labels to the security-findings metric: "ecosystem"
-	// (Dependabot package ecosystem) and "tool" (scanning tool). Off by default because
-	// they multiply series cardinality.
-	// +kubebuilder:validation:items:Enum=ecosystem;tool
+	// FindingDimensions adds optional labels: "ecosystem" (Dependabot package ecosystem) and
+	// "tool" (scanning tool) on the security-findings metric, and "severity" on the
+	// remediation histogram. Off by default because each multiplies series cardinality.
+	// +kubebuilder:validation:items:Enum=ecosystem;tool;severity
 	// +optional
 	FindingDimensions []string `json:"findingDimensions,omitempty"`
 

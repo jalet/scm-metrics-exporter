@@ -235,6 +235,18 @@ func (p *Provider) SnapshotRepo(ctx context.Context, owner, repo string) (provid
 			Msg("source failed; snapshot is partial")
 		snap.SourceErrors = append(snap.SourceErrors, provider.SourceError{Source: provider.SourceSecretScanning})
 	}
+	// Secret-scanning posture is a supplementary per-repo REST read (admin-gated on GitHub):
+	// one Repositories.Get riding inside this Job. Never fatal -- on error or missing access
+	// leave it false and log at debug, consistent with the admin-gated branch_protected. It
+	// runs only when GraphQL posture was captured (the field hangs off that posture object).
+	if len(snap.Repos) > 0 && snap.Repos[0].Posture != nil {
+		if enabled, ssErr := p.secretScanningEnabled(ctx, owner, repo); ssErr != nil {
+			zlog.Debug().Err(ssErr).Str("provider", "github").Str("repo", owner+"/"+repo).
+				Msg("secret-scanning posture unavailable; leaving false")
+		} else {
+			snap.Repos[0].Posture.SecretScanningEnabled = enabled
+		}
+	}
 	// Workflow-run collection is opt-in and supplementary: never fatal, and a failure is a
 	// partial (recorded) source error, not a lost snapshot.
 	if p.collectWorkflows {
@@ -259,6 +271,17 @@ func (p *Provider) SnapshotRepo(ctx context.Context, owner, repo string) (provid
 	zlog.Debug().Str("provider", "github").Str("repo", owner+"/"+repo).
 		Int("repos", len(snap.Repos)).Int("rate_limits", len(snap.RateLimits)).Msg("github repo snapshot assembled")
 	return snap, nil
+}
+
+// secretScanningEnabled reads one repository's secret-scanning status via REST. GitHub
+// exposes it under security_and_analysis, which is admin-gated, so a token without the
+// required access yields an error the caller treats as "false" rather than a failure.
+func (p *Provider) secretScanningEnabled(ctx context.Context, owner, repo string) (bool, error) {
+	r, _, err := p.rest.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return false, err
+	}
+	return r.GetSecurityAndAnalysis().GetSecretScanning().GetStatus() == "enabled", nil
 }
 
 // mergeRepos combines the GraphQL repositories (open PRs + Dependabot findings) with any

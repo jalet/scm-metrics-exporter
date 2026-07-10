@@ -33,7 +33,7 @@ const projectVulnsQuery = `query ProjectVulns($fullPath: ID!, $after: String) {
       after: $after
     ) {
       pageInfo { hasNextPage endCursor }
-      nodes { severity reportType scanner { name } }
+      nodes { severity reportType scanner { name } detectedAt }
     }
   }
 }`
@@ -62,6 +62,7 @@ type projectVulnResponse struct {
 					Scanner    struct {
 						Name string `json:"name"`
 					} `json:"scanner"`
+					DetectedAt string `json:"detectedAt"`
 				} `json:"nodes"`
 			} `json:"vulnerabilities"`
 		} `json:"project"`
@@ -238,9 +239,10 @@ func (p *Provider) collectRepoVulnerabilities(ctx context.Context, path string) 
 				continue
 			}
 			findings = append(findings, provider.Finding{
-				Severity: provider.NormalizeSeverity(n.Severity),
-				Category: cat,
-				Tool:     n.Scanner.Name,
+				Severity:  provider.NormalizeSeverity(n.Severity),
+				Category:  cat,
+				Tool:      n.Scanner.Name,
+				CreatedAt: parseGitLabTime(n.DetectedAt),
 			})
 		}
 		pi := gr.Data.Project.Vulnerabilities.PageInfo
@@ -272,7 +274,9 @@ func (p *Provider) collectRepoPosture(ctx context.Context, path string) (*provid
 		for _, s := range pr.SecurityScanners.Enabled {
 			if strings.EqualFold(s, scannerDependencyScanning) {
 				ps.DependabotEnabled = true
-				break
+			}
+			if strings.EqualFold(s, scannerSecretDetection) {
+				ps.SecretScanningEnabled = true
 			}
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -12,6 +13,10 @@ import (
 
 	"github.com/jalet/scm-metrics-exporter/internal/provider"
 )
+
+// testNow is the fixed observation time the test meter uses, so the open-age histogram
+// (which measures each finding's age against the observation time) is deterministic.
+var testNow = time.Unix(1_700_000_000, 0)
 
 type fakeSource struct {
 	names     []string
@@ -30,7 +35,7 @@ func setupReader(t *testing.T, src SnapshotSource, dims Dimensions, remediation 
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
-	record, err := register(mp.Meter("test"), src, dims, remediation)
+	record, err := register(mp.Meter("test"), src, dims, remediation, func() time.Time { return testNow })
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -144,7 +149,7 @@ func TestObservableRepoInfo(t *testing.T) {
 		names: []string{"github"},
 		snapshots: map[string]provider.Snapshot{
 			"github": {Repos: []provider.RepoMetrics{
-				{Name: "alpha", Posture: &provider.RepoPosture{Visibility: "private", DependabotEnabled: true, BranchProtected: true}},
+				{Name: "alpha", Posture: &provider.RepoPosture{Visibility: "private", DependabotEnabled: true, BranchProtected: true, SecretScanningEnabled: true}},
 				{Name: "beta"}, // no posture -> no scm_repo_info series
 			}},
 		},
@@ -159,6 +164,7 @@ func TestObservableRepoInfo(t *testing.T) {
 			attribute.String(attrArchived, "false"),
 			attribute.String(attrBranchProtected, "true"),
 			attribute.String(attrDependabotEnabled, "true"),
+			attribute.String(attrSecretScanningEnabled, "true"),
 		), Value: 1},
 	}}
 	metricdatatest.AssertAggregationsEqual(t, want, collect(t, reader)[metricRepoInfo], metricdatatest.IgnoreTimestamp())
@@ -279,6 +285,90 @@ func TestRemediationHistogramEmitted(t *testing.T) {
 		},
 	}
 	metricdatatest.AssertAggregationsEqual(t, wantCount, got[metricRemediationCount], metricdatatest.IgnoreTimestamp())
+}
+
+func TestOpenAgeHistogram(t *testing.T) {
+	// Two open dependency findings: ages 30m and 2h against the fixed observation time.
+	// A third finding has a zero CreatedAt and must be excluded from all three series.
+	src := fakeSource{
+		names: []string{"github"},
+		snapshots: map[string]provider.Snapshot{
+			"github": {Repos: []provider.RepoMetrics{{
+				Name: "alpha",
+				Findings: []provider.Finding{
+					{Category: provider.CategoryDependency, CreatedAt: testNow.Add(-30 * time.Minute)},
+					{Category: provider.CategoryDependency, CreatedAt: testNow.Add(-2 * time.Hour)},
+					{Category: provider.CategoryDependency}, // zero CreatedAt -> excluded
+				},
+			}}},
+		},
+	}
+	reader, _ := setupReader(t, src, Dimensions{}, nil)
+	got := collect(t, reader)
+
+	withLE := func(le string) attribute.Set {
+		return attribute.NewSet(
+			attribute.String(attrProvider, "github"),
+			attribute.String(attrRepo, "alpha"),
+			attribute.String(attrCategory, provider.CategoryDependency),
+			attribute.String(attrLE, le),
+		)
+	}
+	// Cumulative from below: 30m (1800s) <= every finite bound; 2h (7200s) <= all but le=3600.
+	wantBucket := metricdata.Gauge[int64]{DataPoints: []metricdata.DataPoint[int64]{
+		{Attributes: withLE("3600"), Value: 1},
+		{Attributes: withLE("21600"), Value: 2},
+		{Attributes: withLE("86400"), Value: 2},
+		{Attributes: withLE("259200"), Value: 2},
+		{Attributes: withLE("604800"), Value: 2},
+		{Attributes: withLE("1209600"), Value: 2},
+		{Attributes: withLE("2592000"), Value: 2},
+		{Attributes: withLE("7776000"), Value: 2},
+		{Attributes: withLE("+Inf"), Value: 2},
+	}}
+	metricdatatest.AssertAggregationsEqual(t, wantBucket, got[metricOpenAgeBucket], metricdatatest.IgnoreTimestamp())
+
+	base := attribute.NewSet(
+		attribute.String(attrProvider, "github"),
+		attribute.String(attrRepo, "alpha"),
+		attribute.String(attrCategory, provider.CategoryDependency),
+	)
+	wantCount := metricdata.Gauge[int64]{DataPoints: []metricdata.DataPoint[int64]{{Attributes: base, Value: 2}}}
+	metricdatatest.AssertAggregationsEqual(t, wantCount, got[metricOpenAgeCount], metricdatatest.IgnoreTimestamp())
+
+	wantSum := metricdata.Gauge[float64]{DataPoints: []metricdata.DataPoint[float64]{
+		{Attributes: base, Value: (30*time.Minute + 2*time.Hour).Seconds()},
+	}}
+	metricdatatest.AssertAggregationsEqual(t, wantSum, got[metricOpenAgeSum], metricdatatest.IgnoreTimestamp())
+}
+
+func TestRemediationHistogramSeverityLabel(t *testing.T) {
+	src := fakeSource{names: []string{"github"}, snapshots: map[string]provider.Snapshot{"github": {}}}
+	rem := fakeRemediation{series: []provider.RemediationSeries{{
+		Provider: "github", Repo: "acme/svc", Category: provider.CategoryDependency,
+		Resolution: provider.ResolutionFixed, Severity: provider.SeverityHigh,
+		Buckets: []provider.RemediationBucket{{LE: 3600, Count: 1}, {LE: math.Inf(1), Count: 1}},
+		Sum:     1800, Count: 1,
+	}}}
+	reader, _ := setupReader(t, src, Dimensions{Severity: true}, rem)
+	got := collect(t, reader)
+
+	// Every remediation series carries the severity label when the recorded scope had one.
+	wantSum := metricdata.Sum[float64]{
+		Temporality: metricdata.CumulativeTemporality,
+		IsMonotonic: true,
+		DataPoints: []metricdata.DataPoint[float64]{{
+			Attributes: attribute.NewSet(
+				attribute.String(attrProvider, "github"),
+				attribute.String(attrRepo, "acme/svc"),
+				attribute.String(attrCategory, provider.CategoryDependency),
+				attribute.String(attrResolution, provider.ResolutionFixed),
+				attribute.String(attrSeverity, provider.SeverityHigh),
+			),
+			Value: 1800,
+		}},
+	}
+	metricdatatest.AssertAggregationsEqual(t, wantSum, got[metricRemediationSum], metricdatatest.IgnoreTimestamp())
 }
 
 func TestFindingsByStateGauge(t *testing.T) {

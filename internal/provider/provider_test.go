@@ -31,15 +31,24 @@ func TestNormalizeSeverity(t *testing.T) {
 }
 
 func TestRemediationScopeRoundTrip(t *testing.T) {
-	scope := RemediationScope("gitlab", "grp/sub/svc", CategoryDependency, ResolutionFixed)
-	p, r, c, res, ok := ParseRemediationScope(scope)
-	if !ok || p != "gitlab" || r != "grp/sub/svc" || c != CategoryDependency || res != ResolutionFixed {
-		t.Fatalf("round trip failed: got (%q,%q,%q,%q,%v)", p, r, c, res, ok)
+	scope := RemediationScope("gitlab", "grp/sub/svc", CategoryDependency, ResolutionFixed, SeverityHigh)
+	p, r, c, res, sev, ok := ParseRemediationScope(scope)
+	if !ok || p != "gitlab" || r != "grp/sub/svc" || c != CategoryDependency || res != ResolutionFixed || sev != SeverityHigh {
+		t.Fatalf("round trip failed: got (%q,%q,%q,%q,%q,%v)", p, r, c, res, sev, ok)
+	}
+}
+
+func TestRemediationScopeRoundTripEmptySeverity(t *testing.T) {
+	// When the severity dimension is off, the fifth field is empty and must round-trip.
+	scope := RemediationScope("github", "acme/svc", CategoryStaticAnalysis, ResolutionFixed, "")
+	p, r, c, res, sev, ok := ParseRemediationScope(scope)
+	if !ok || p != "github" || r != "acme/svc" || c != CategoryStaticAnalysis || res != ResolutionFixed || sev != "" {
+		t.Fatalf("round trip failed: got (%q,%q,%q,%q,%q,%v)", p, r, c, res, sev, ok)
 	}
 }
 
 func TestParseRemediationScopeRejectsMalformed(t *testing.T) {
-	if _, _, _, _, ok := ParseRemediationScope("only:one:field"); ok {
+	if _, _, _, _, _, ok := ParseRemediationScope("only:one:field"); ok {
 		t.Fatal("expected ok=false for a scope without the unit-separator layout")
 	}
 }

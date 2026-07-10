@@ -96,6 +96,8 @@ func TestSnapshotRepoLifecycle(t *testing.T) {
 			_, _ = w.Write([]byte(`[]`))
 		case r.URL.Path == "/repos/acme/widget/dependabot/alerts":
 			_, _ = w.Write([]byte(`[]`))
+		case r.URL.Path == "/repos/acme/widget":
+			_, _ = w.Write([]byte(`{}`)) // secret-scanning posture read (disabled)
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)

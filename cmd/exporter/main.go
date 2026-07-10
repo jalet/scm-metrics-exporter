@@ -81,6 +81,7 @@ func run(ctx context.Context, providerName string, once bool, repo string) error
 	mp, recordScrapeErr, err := metrics.Setup(ctx, coll, version, metrics.Dimensions{
 		Ecosystem: cfg.Dimensions.Ecosystem,
 		Tool:      cfg.Dimensions.Tool,
+		Severity:  cfg.Dimensions.Severity,
 	}, remediation)
 	if err != nil {
 		return err
@@ -115,7 +116,7 @@ func run(ctx context.Context, providerName string, once bool, repo string) error
 		perr := coll.PollOnce(ctx, recordScrapeErr)
 		if lcStore != nil {
 			if snap, ok := coll.Latest(prov.Name()); ok {
-				if rerr := lifecycle.Record(ctx, lcStore, prov.Name(), snap, cfg.Lifecycle.ResolutionWindow); rerr != nil {
+				if rerr := lifecycle.Record(ctx, lcStore, prov.Name(), snap, cfg.Lifecycle.ResolutionWindow, cfg.Dimensions.Severity); rerr != nil {
 					zlog.Warn().Err(rerr).Msg("recording resolved findings")
 					recordScrapeErr(prov.Name(), provider.SourceLifecycle)
 				}

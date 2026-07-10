@@ -33,11 +33,14 @@ credentials and rate budgets.
 | `scm.security_findings.open` | gauge | provider, repo, severity, category | `scm_security_findings_open` |
 | `scm.api.rate_limit_remaining` | gauge | provider, resource | `scm_api_rate_limit_remaining` |
 | `scm.exporter.scrape_errors` | counter | provider, source | `scm_exporter_scrape_errors_total` |
-| `scm.repo.info` | gauge | provider, repo, visibility, archived, branch_protected, dependabot_enabled | `scm_repo_info` |
+| `scm.repo.info` | gauge | provider, repo, visibility, archived, branch_protected, dependabot_enabled, secret_scanning_enabled | `scm_repo_info` |
 | `scm.workflow_runs.recent` | gauge | provider, repo, workflow, conclusion | `scm_workflow_runs_recent` |
-| `scm.finding_remediation_seconds.bucket` | monotonic counter (histogram bucket) | provider, repo, category, resolution, le | `scm_finding_remediation_seconds_bucket` |
-| `scm.finding_remediation_seconds.sum` | monotonic counter | provider, repo, category, resolution | `scm_finding_remediation_seconds_sum` |
-| `scm.finding_remediation_seconds.count` | monotonic counter | provider, repo, category, resolution | `scm_finding_remediation_seconds_count` |
+| `scm.finding_remediation_seconds.bucket` | monotonic counter (histogram bucket) | provider, repo, category, resolution, le, [severity] | `scm_finding_remediation_seconds_bucket` |
+| `scm.finding_remediation_seconds.sum` | monotonic counter | provider, repo, category, resolution, [severity] | `scm_finding_remediation_seconds_sum` |
+| `scm.finding_remediation_seconds.count` | monotonic counter | provider, repo, category, resolution, [severity] | `scm_finding_remediation_seconds_count` |
+| `scm.finding_open_age_seconds.bucket` | gauge (histogram bucket) | provider, repo, category, le | `scm_finding_open_age_seconds_bucket` |
+| `scm.finding_open_age_seconds.sum` | gauge | provider, repo, category | `scm_finding_open_age_seconds_sum` |
+| `scm.finding_open_age_seconds.count` | gauge | provider, repo, category | `scm_finding_open_age_seconds_count` |
 | `scm.findings.by_state` | gauge | provider, repo, category, state | `scm_findings_by_state` |
 
 `severity` is one of `critical`, `high`, `medium`, `low`, or `unknown` (GitHub
@@ -45,16 +48,19 @@ secret-scanning alerts carry no severity). `category` is one of `dependency`,
 `static_analysis`, `secret`, `container`. `source` is `graphql`, `rest`, or
 `secret_scanning`; `resource` is `graphql` or `rest`. Optional `ecosystem` (Dependabot
 package ecosystem) and `tool` (scanning tool) labels are added to
-`scm_security_findings_open` only when enabled via `SCM_FINDING_DIMENSIONS`.
+`scm_security_findings_open`, and an optional `severity` label to the remediation
+histogram, only when enabled via `SCM_FINDING_DIMENSIONS` (`spec.findingDimensions`:
+`ecosystem`, `tool`, `severity`). Enabling or disabling `severity` changes the remediation
+scope key, so the affected counters restart from zero once (benign; `rate()` tolerates it).
 
 `scm_repo_info` is a constant `1` carrying each repository's security posture on its
 labels (the info-metric pattern; join it against the other series by `provider,repo`).
 `visibility` is `public`/`private`/`internal`, `branch_protected` means the default
 branch is protected by a classic branch-protection rule or an active repository ruleset,
-and `dependabot_enabled` means automated
-dependency-vulnerability alerting is on (GitHub Dependabot alerts, or GitLab dependency
-scanning). Some fields are admin-gated, so a token without the required access may report
-them as `false`.
+`dependabot_enabled` means automated dependency-vulnerability alerting is on (GitHub
+Dependabot alerts, or GitLab dependency scanning), and `secret_scanning_enabled` means
+secret scanning is on (GitHub secret scanning, or GitLab `SECRET_DETECTION`). Some fields
+are admin-gated, so a token without the required access may report them as `false`.
 
 `scm_workflow_runs_recent` (opt-in via `spec.collectWorkflows`) counts recent CI runs in a
 lookback window (`spec.workflowLookback`, default 7d) by `workflow` and `conclusion`;
@@ -124,9 +130,17 @@ fatal to a collection Job. If Valkey loses its data, the cumulative counters res
 and climb again as findings are re-counted; this is a benign counter reset that `rate()` and
 `increase()` already tolerate.
 
-**Not included in this epic (deferred):** a `severity` label on the histogram (would
-multiply series cardinality on top of `provider,repo,category,resolution`), and a
-`scm_finding_open_age_seconds` gauge for open (not yet resolved) findings.
+An optional `severity` label can be added to the remediation histogram via
+`SCM_FINDING_DIMENSIONS=severity` (`spec.findingDimensions`), off by default because it
+multiplies series cardinality on top of `provider,repo,category,resolution`. Toggling it
+changes the scope key, so the affected counters restart from zero once (benign; `rate()`
+tolerates it).
+
+`scm_finding_open_age_seconds` is an always-on, point-in-time gauge histogram of how long
+open (not yet resolved) findings have been open, per `provider,repo,category`, observed
+from each finding's creation time against the current time. It needs no Valkey (unlike the
+remediation histogram). "Open longer than 30d" is `count - bucket{le="2592000"}`; mean open
+age is `sum / count`. Findings whose creation time is unknown are excluded.
 
 ## Components
 

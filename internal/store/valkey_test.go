@@ -29,7 +29,7 @@ func newTestStore(t *testing.T) (*Valkey, *miniredis.Miniredis) {
 func TestRecordIfNewDedups(t *testing.T) {
 	v, _ := newTestStore(t)
 	ctx := context.Background()
-	scope := provider.RemediationScope("github", "acme/svc", provider.CategoryDependency, provider.ResolutionFixed)
+	scope := provider.RemediationScope("github", "acme/svc", provider.CategoryDependency, provider.ResolutionFixed, "")
 
 	first, err := v.RecordIfNew(ctx, scope, "alert-1", 2*time.Hour, 90*24*time.Hour)
 	if err != nil || !first {
@@ -47,7 +47,7 @@ func TestRecordIfNewDedups(t *testing.T) {
 func TestRecordIfNewDuplicateDoesNotIncrement(t *testing.T) {
 	v, _ := newTestStore(t)
 	ctx := context.Background()
-	scope := provider.RemediationScope("github", "acme/svc", provider.CategoryDependency, provider.ResolutionFixed)
+	scope := provider.RemediationScope("github", "acme/svc", provider.CategoryDependency, provider.ResolutionFixed, "")
 
 	first, err := v.RecordIfNew(ctx, scope, "alert-1", 2*time.Hour, 90*24*time.Hour)
 	if err != nil || !first {
@@ -105,7 +105,7 @@ func TestRecordIfNewDuplicateDoesNotIncrement(t *testing.T) {
 func TestRemediationCumulativeBuckets(t *testing.T) {
 	v, _ := newTestStore(t)
 	ctx := context.Background()
-	scope := provider.RemediationScope("github", "acme/svc", provider.CategoryDependency, provider.ResolutionFixed)
+	scope := provider.RemediationScope("github", "acme/svc", provider.CategoryDependency, provider.ResolutionFixed, "")
 
 	// 2h resolution: counts in every bucket with le >= 7200 (i.e. all but the 1h bucket).
 	if _, err := v.RecordIfNew(ctx, scope, "a1", 2*time.Hour, 90*24*time.Hour); err != nil {
@@ -152,5 +152,37 @@ func TestRemediationCumulativeBuckets(t *testing.T) {
 	}
 	if infCount != 2 {
 		t.Errorf("+Inf bucket: got %d want 2", infCount)
+	}
+}
+
+// TestRemediationScopeSeverityRoundTrip proves the fifth (severity) scope field survives a
+// record/read cycle: a scope recorded with a severity component reads back with
+// RemediationSeries.Severity set, and one recorded without stays empty.
+func TestRemediationScopeSeverityRoundTrip(t *testing.T) {
+	v, _ := newTestStore(t)
+	ctx := context.Background()
+	withSev := provider.RemediationScope("github", "acme/svc", provider.CategoryDependency, provider.ResolutionFixed, provider.SeverityHigh)
+	noSev := provider.RemediationScope("github", "acme/other", provider.CategoryDependency, provider.ResolutionFixed, "")
+
+	if _, err := v.RecordIfNew(ctx, withSev, "a1", 2*time.Hour, 90*24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.RecordIfNew(ctx, noSev, "b1", 2*time.Hour, 90*24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	series, err := v.Remediation(ctx)
+	if err != nil {
+		t.Fatalf("Remediation: %v", err)
+	}
+	got := map[string]string{} // repo -> severity
+	for _, s := range series {
+		got[s.Repo] = s.Severity
+	}
+	if got["acme/svc"] != provider.SeverityHigh {
+		t.Errorf("acme/svc severity = %q, want %q", got["acme/svc"], provider.SeverityHigh)
+	}
+	if got["acme/other"] != "" {
+		t.Errorf("acme/other severity = %q, want empty", got["acme/other"])
 	}
 }

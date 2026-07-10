@@ -42,12 +42,14 @@ type LifecycleConfig struct {
 	ValkeyPassword   string
 }
 
-// FindingDimensions selects optional labels on the security-findings metric. Off by
-// default because they multiply cardinality; enabled via SCM_FINDING_DIMENSIONS
-// (a comma-separated list, for example "ecosystem,tool").
+// FindingDimensions selects optional labels on the security-findings metric (and, for
+// Severity, the remediation histogram). Off by default because they multiply cardinality;
+// enabled via SCM_FINDING_DIMENSIONS (a comma-separated list, for example
+// "ecosystem,tool,severity").
 type FindingDimensions struct {
 	Ecosystem bool
 	Tool      bool
+	Severity  bool
 }
 
 // GitHubConfig holds GitHub provider settings. TargetType selects org (default) or
@@ -218,6 +220,8 @@ func parseDimensions(raw string) FindingDimensions {
 			d.Ecosystem = true
 		case "tool":
 			d.Tool = true
+		case "severity":
+			d.Severity = true
 		}
 	}
 	return d
