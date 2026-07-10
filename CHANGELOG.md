@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/jalet/scm-metrics-exporter/compare/v0.6.0...v0.6.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* **chart:** drop version-varying labels from valkey volumeClaimTemplates ([#33](https://github.com/jalet/scm-metrics-exporter/issues/33)) ([a4607df](https://github.com/jalet/scm-metrics-exporter/commit/a4607dfc95e65a679727d96da04c7dc4664bdf22))
+
 ## [0.6.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.5.0...v0.6.0) (2026-07-10)
 
 
