@@ -83,10 +83,16 @@ spec:
             - name: data
               mountPath: /data
   volumeClaimTemplates:
+    # Only the stable selector labels here, never the full valkeyLabels set:
+    # volumeClaimTemplates is one of the immutable StatefulSet spec fields, so the
+    # version-varying helm.sh/chart and app.kubernetes.io/version labels would make every
+    # chart upgrade a forbidden update ("updates to statefulset spec for fields other than
+    # 'replicas', ... are forbidden"), rejected by the API server (and by Argo CD's
+    # server-side diff dry-run). The selector labels are constant across releases.
     - metadata:
         name: data
         labels:
-          {{- include "scm-metrics-exporter.valkeyLabels" . | nindent 10 }}
+          {{- include "scm-metrics-exporter.valkeySelectorLabels" . | nindent 10 }}
       spec:
         accessModes: ["ReadWriteOnce"]
         resources:
