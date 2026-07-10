@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"testing"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -15,6 +16,11 @@ import (
 	"github.com/jalet/scm-metrics-exporter/internal/discovery"
 )
 
+// stubGitLabBudget returns a fixed rate budget, so the dispatch gate needs no network.
+func stubGitLabBudget(b discovery.Budget, err error) func(context.Context, discovery.GitLabAuth) (discovery.Budget, error) {
+	return func(context.Context, discovery.GitLabAuth) (discovery.Budget, error) { return b, err }
+}
+
 func newGitLabReconciler(repos ...string) *GitLabMetricsExporterReconciler {
 	return &GitLabMetricsExporterReconciler{
 		Client:        k8sClient,
@@ -23,6 +29,8 @@ func newGitLabReconciler(repos ...string) *GitLabMetricsExporterReconciler {
 		DiscoverProjects: func(context.Context, discovery.GitLabAuth, string, string, discovery.Selector) ([]string, error) {
 			return repos, nil
 		},
+		// Ample budget by default so existing tests dispatch as before; gate tests override.
+		RateBudget: stubGitLabBudget(discovery.Budget{Remaining: 5000, Known: true}, nil),
 	}
 }
 
@@ -134,5 +142,51 @@ func TestGitLabReconcileMissingSecretSetsCondition(t *testing.T) {
 	}
 	if len(listJobs(t, ns, "gl-nocreds")) != 0 {
 		t.Error("dispatched Jobs with invalid credentials, want none")
+	}
+}
+
+func TestGitLabReconcilePausesWhenRateLimited(t *testing.T) {
+	ctx := context.Background()
+	ns := createNamespace(t)
+	createSecret(t, ns, "gl-creds", map[string][]byte{"token": []byte("glpat")})
+
+	cr := &scmv1alpha1.GitLabMetricsExporter{
+		ObjectMeta: metav1.ObjectMeta{Name: "gl-rl", Namespace: ns},
+		Spec: scmv1alpha1.GitLabMetricsExporterSpec{
+			ExporterSpec: scmv1alpha1.ExporterSpec{
+				Export:             scmv1alpha1.ExportConfig{OTLPEndpoint: testOTLPEndpoint},
+				CredentialsSecret:  corev1.LocalObjectReference{Name: "gl-creds"},
+				RateLimitThreshold: 200,
+			},
+			Group: "acme", TokenKey: "token",
+		},
+	}
+	if err := k8sClient.Create(ctx, cr); err != nil {
+		t.Fatalf("create cr: %v", err)
+	}
+
+	reset := time.Now().Add(30 * time.Minute)
+	r := newGitLabReconciler("acme/svc-a", "acme/svc-b")
+	r.RateBudget = stubGitLabBudget(discovery.Budget{Remaining: 5, Reset: reset, Known: true}, nil)
+
+	res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "gl-rl", Namespace: ns}})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	if jobs := listJobs(t, ns, "gl-rl"); len(jobs) != 0 {
+		t.Errorf("dispatched %d jobs, want 0 when rate limited", len(jobs))
+	}
+	if res.RequeueAfter < 29*time.Minute || res.RequeueAfter > 31*time.Minute {
+		t.Errorf("RequeueAfter = %v, want ~30m (until the rate-limit reset)", res.RequeueAfter)
+	}
+
+	var got scmv1alpha1.GitLabMetricsExporter
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: "gl-rl", Namespace: ns}, &got); err != nil {
+		t.Fatal(err)
+	}
+	cond := meta.FindStatusCondition(got.Status.Conditions, conditionReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != reasonRateLimited {
+		t.Errorf("Ready condition = %+v, want False/RateLimited", cond)
 	}
 }

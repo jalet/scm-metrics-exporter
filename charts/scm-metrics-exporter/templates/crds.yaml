@@ -242,6 +242,16 @@ spec:
                 format: int32
                 minimum: 1
                 type: integer
+              rateLimitThreshold:
+                default: 200
+                description: |-
+                  RateLimitThreshold pauses new collection Jobs when the shared credential's remaining
+                  API budget falls below this floor, resuming after the provider's rate-limit window
+                  resets. It complements Parallelism: Parallelism bounds concurrent pressure, while this
+                  stops dispatch entirely once the budget runs low. 0 disables the guard.
+                format: int32
+                minimum: 0
+                type: integer
               resolutionWindow:
                 default: 2160h
                 description: |-
@@ -687,6 +697,16 @@ spec:
                   keeps request bursts under the provider's secondary limits.
                 format: int32
                 minimum: 1
+                type: integer
+              rateLimitThreshold:
+                default: 200
+                description: |-
+                  RateLimitThreshold pauses new collection Jobs when the shared credential's remaining
+                  API budget falls below this floor, resuming after the provider's rate-limit window
+                  resets. It complements Parallelism: Parallelism bounds concurrent pressure, while this
+                  stops dispatch entirely once the budget runs low. 0 disables the guard.
+                format: int32
+                minimum: 0
                 type: integer
               resolutionWindow:
                 default: 2160h

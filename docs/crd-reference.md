@@ -14,7 +14,8 @@ These fields are present on both `GitHubMetricsExporter` and `GitLabMetricsExpor
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `discoveryInterval` | duration string | `15m` | How often the operator re-discovers repositories and re-dispatches Jobs. |
-| `parallelism` | integer | `3` | Max concurrent collection Jobs (minimum 1). The rate-limit governor. |
+| `parallelism` | integer | `3` | Max concurrent collection Jobs (minimum 1). Bounds concurrent API pressure on the shared credential. |
+| `rateLimitThreshold` | integer | `200` | Pause dispatching new collection Jobs when the credential's remaining API budget falls below this floor, resuming after the provider's rate-limit window resets. `0` disables the guard. See [Rate-limit handling](#rate-limit-handling). |
 | `image` | string | (operator image) | Override the collection-Job container image. |
 | `resources` | ResourceRequirements | none | Collection-Job container compute resources. |
 | `export.otlpEndpoint` | string | (required) | OTLP metrics endpoint the Jobs push to. Ephemeral Jobs cannot be scraped, so this is mandatory. |
@@ -46,6 +47,31 @@ check still fails fast at Job start rather than silently skipping the histogram)
 Criteria within a filter are ANDed. `include` selects the candidate set (empty include
 matches every repository); `exclude` then drops any repository it matches (empty exclude
 removes nothing).
+
+## Rate-limit handling
+
+Before discovering repositories or dispatching Jobs, the operator checks the credential's
+remaining API budget and pauses when it is low, so a throttled credential is not driven
+further into exhaustion by more Jobs. The floor is `rateLimitThreshold` (shared spec); the
+operator and the Jobs it spawns share one credential, and therefore one budget.
+
+- **GitHub** reads the free `/rate_limit` endpoint (it does not consume quota) and gates on
+  the tighter of the REST-core and GraphQL buckets, since Jobs spend from both.
+- **GitLab** issues one cheap `GET /version` and reads the `RateLimit-Remaining` /
+  `RateLimit-Reset` response headers. An instance with rate limiting disabled sends no such
+  headers, so the guard is a no-op there.
+
+When the remaining budget is below `rateLimitThreshold`, the operator dispatches no new Jobs,
+sets `Ready=False` with reason `RateLimited`, and requeues at the reported reset time.
+Already-running Jobs finish, and the cached discovery inventory is retained. The probe is
+fail-open: if it errors (network, unexpected response), the operator proceeds with dispatch
+rather than stalling collection.
+
+Inside a collection Job, a GitHub rate-limit response (primary `403` with
+`X-RateLimit-Remaining: 0`, or a secondary/abuse limit) is reported as a
+`scm_exporter_scrape_errors_total{source="rest"|"secret_scanning"}` source error rather than
+being treated as "feature not accessible", so exhaustion stays visible instead of silently
+yielding empty findings.
 
 ## `GitHubMetricsExporter`
 
@@ -113,3 +139,4 @@ Conditions set by the controller (type `Ready`):
 | `DiscoveryFailed` | False | Could not list repositories (check credentials/access). |
 | `DispatchFailed` | False | Could not create collection Jobs. |
 | `CredentialsInvalid` | False | The referenced Secret is missing or lacks the required key. |
+| `RateLimited` | False | The credential's remaining API budget is below `rateLimitThreshold`; dispatch is paused until the provider's rate-limit window resets. |

@@ -26,6 +26,15 @@ type ExporterSpec struct {
 	// +optional
 	Parallelism int32 `json:"parallelism,omitempty"`
 
+	// RateLimitThreshold pauses new collection Jobs when the shared credential's remaining
+	// API budget falls below this floor, resuming after the provider's rate-limit window
+	// resets. It complements Parallelism: Parallelism bounds concurrent pressure, while this
+	// stops dispatch entirely once the budget runs low. 0 disables the guard.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=200
+	// +optional
+	RateLimitThreshold int32 `json:"rateLimitThreshold,omitempty"`
+
 	// Image overrides the exporter container image run by the collection Jobs. When empty
 	// the operator injects its own image reference.
 	// +optional

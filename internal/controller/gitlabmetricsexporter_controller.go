@@ -24,10 +24,18 @@ type GitLabMetricsExporterReconciler struct {
 	// DiscoverProjects lists the target's project paths. Defaults to live GitLab discovery
 	// and is overridable in tests so reconciliation needs no network.
 	DiscoverProjects func(ctx context.Context, auth discovery.GitLabAuth, target, targetType string, sel discovery.Selector) ([]string, error)
+	// RateBudget reports the credential's remaining API budget. It defaults to a live probe
+	// and is overridable in tests so reconciliation needs no network.
+	RateBudget func(ctx context.Context, auth discovery.GitLabAuth) (discovery.Budget, error)
 }
 
 func discoverGitLabProjects(ctx context.Context, auth discovery.GitLabAuth, target, targetType string, sel discovery.Selector) ([]string, error) {
 	return discovery.ListGitLabProjects(ctx, auth, target, targetType, sel)
+}
+
+// gitlabRateBudget is the default RateBudget: probe the instance's RateLimit-* headers.
+func gitlabRateBudget(ctx context.Context, auth discovery.GitLabAuth) (discovery.Budget, error) {
+	return discovery.GitLabRateBudget(ctx, auth)
 }
 
 // +kubebuilder:rbac:groups=scm.jalet.io,resources=gitlabmetricsexporters,verbs=get;list;watch;create;update;patch;delete
@@ -46,6 +54,18 @@ func (r *GitLabMetricsExporterReconciler) Reconcile(ctx context.Context, req ctr
 	if err != nil {
 		setReadyCondition(&cr.Status.Conditions, cr.Generation, metav1.ConditionFalse, reasonCredentialInvalid, err.Error())
 		return r.updateStatus(ctx, &cr, ctrl.Result{RequeueAfter: credentialRequeue})
+	}
+
+	// Pause before discovery and dispatch when the credential's API budget is low, so the
+	// operator stops spending quota (discovery included) until the rate-limit window resets.
+	rateBudget := r.RateBudget
+	if rateBudget == nil {
+		rateBudget = gitlabRateBudget
+	}
+	if limited, requeue, msg := rateLimited(ctx, cr.Spec.RateLimitThreshold,
+		func(c context.Context) (discovery.Budget, error) { return rateBudget(c, auth) }); limited {
+		setReadyCondition(&cr.Status.Conditions, cr.Generation, metav1.ConditionFalse, reasonRateLimited, msg)
+		return r.updateStatus(ctx, &cr, ctrl.Result{RequeueAfter: requeue})
 	}
 
 	discover := r.DiscoverProjects

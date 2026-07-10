@@ -54,6 +54,12 @@ kubectl annotate ghme <cr-name> -n scm-system scm.jalet.io/rotated="$(date +%s)"
   Check the credentials and that the token/App can see the target's repos/projects.
 - **CR `Ready=False` / `CredentialsInvalid`** -- the Secret is missing or lacks the key
   named by `tokenKey` / `appPrivateKeyKey`.
+- **CR `Ready=False` / `RateLimited`**: the credential's remaining API budget fell below
+  `spec.rateLimitThreshold`, so the operator paused dispatch. It resumes automatically once
+  the provider's rate-limit window resets. To reduce pausing, give a credential fewer targets
+  (a GitHub App per org gets its own budget), or lower `rateLimitThreshold` if the floor is
+  too conservative for your instance's limits. See the
+  [CRD reference](crd-reference.md#rate-limit-handling).
 - **No metrics for a repo** -- inspect that repo's collection Job:
 
 ```sh
@@ -63,8 +69,10 @@ kubectl get jobs -n scm-system -l app.kubernetes.io/instance=<cr-name>
 
 `scm_exporter_scrape_errors_total` (by `source`) rises when a data source fails within a
 Job: `graphql` is often a token lacking Dependabot access, `rest` is code scanning access
-or the feature not enabled, `secret_scanning` is secret-scanning access. A failed source is
-partial -- the Job still pushes the other signals and exits 0.
+or the feature not enabled, `secret_scanning` is secret-scanning access. A GitHub rate-limit
+response (primary or secondary) also surfaces here as `rest` or `secret_scanning`, rather
+than being silently skipped. A failed source is partial -- the Job still pushes the other
+signals and exits 0.
 
 ## Valkey operations (alert lifecycle / MTTR)
 

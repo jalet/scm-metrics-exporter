@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -101,6 +103,46 @@ func matchesGitLab(pr gitlabProject, f Filter) bool {
 		return false
 	}
 	return true
+}
+
+// GitLabRateBudget reports the remaining GitLab API budget for auth's token. GitLab has no
+// free rate-limit endpoint, so it issues one cheap authenticated GET /version and reads the
+// RateLimit-Remaining / RateLimit-Reset (Unix epoch) response headers. An instance with rate
+// limiting disabled sends no such headers, yielding Known=false so the caller does not gate.
+func GitLabRateBudget(ctx context.Context, auth GitLabAuth) (Budget, error) {
+	client, err := gitlabHTTPClient(auth)
+	if err != nil {
+		return Budget{}, err
+	}
+	apiBase := gitlabEnsureAPIBase(auth.BaseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiBase+"/version", nil)
+	if err != nil {
+		return Budget{}, fmt.Errorf("discovery: gitlab rate limit request: %w", err)
+	}
+	resp, err := client.Do(req) //nolint:gosec // apiBase is operator-configured, not attacker input
+	if err != nil {
+		return Budget{}, fmt.Errorf("discovery: gitlab rate limit: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return gitlabBudgetFromHeaders(resp.Header), nil
+}
+
+// gitlabBudgetFromHeaders reads a Budget from GitLab's RateLimit-* response headers. Absent or
+// unparseable RateLimit-Remaining yields Known=false.
+func gitlabBudgetFromHeaders(h http.Header) Budget {
+	rem := h.Get("RateLimit-Remaining")
+	if rem == "" {
+		return Budget{}
+	}
+	n, err := strconv.Atoi(rem)
+	if err != nil {
+		return Budget{}
+	}
+	b := Budget{Remaining: n, Known: true}
+	if sec, err := strconv.ParseInt(h.Get("RateLimit-Reset"), 10, 64); err == nil && sec > 0 {
+		b.Reset = time.Unix(sec, 0)
+	}
+	return b
 }
 
 func gitlabHTTPClient(auth GitLabAuth) (*http.Client, error) {
