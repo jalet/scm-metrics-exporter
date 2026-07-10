@@ -26,6 +26,9 @@ type GitHubMetricsExporterReconciler struct {
 	// DiscoverRepos lists the target's repositories. It defaults to live GitHub discovery
 	// and is overridable in tests so reconciliation needs no network.
 	DiscoverRepos func(ctx context.Context, auth discovery.GitHubAuth, owner, targetType string, sel discovery.Selector) ([]string, error)
+	// RateBudget reports the credential's remaining API budget. It defaults to a live
+	// /rate_limit probe and is overridable in tests so reconciliation needs no network.
+	RateBudget func(ctx context.Context, auth discovery.GitHubAuth) (discovery.Budget, error)
 }
 
 // discoverGitHubRepos is the default DiscoverRepos: build a client and list repositories.
@@ -35,6 +38,15 @@ func discoverGitHubRepos(ctx context.Context, auth discovery.GitHubAuth, owner, 
 		return nil, err
 	}
 	return discovery.ListRepos(ctx, c, owner, targetType, sel)
+}
+
+// githubRateBudget is the default RateBudget: build a client and probe /rate_limit.
+func githubRateBudget(ctx context.Context, auth discovery.GitHubAuth) (discovery.Budget, error) {
+	c, err := discovery.NewGitHubClient(auth)
+	if err != nil {
+		return discovery.Budget{}, err
+	}
+	return discovery.GitHubRateBudget(ctx, c)
 }
 
 // +kubebuilder:rbac:groups=scm.jalet.io,resources=githubmetricsexporters,verbs=get;list;watch;create;update;patch;delete
@@ -56,6 +68,18 @@ func (r *GitHubMetricsExporterReconciler) Reconcile(ctx context.Context, req ctr
 	if err != nil {
 		setReadyCondition(&cr.Status.Conditions, cr.Generation, metav1.ConditionFalse, reasonCredentialInvalid, err.Error())
 		return r.updateStatus(ctx, &cr, ctrl.Result{RequeueAfter: credentialRequeue})
+	}
+
+	// Pause before discovery and dispatch when the credential's API budget is low, so the
+	// operator stops spending quota (discovery included) until the rate-limit window resets.
+	rateBudget := r.RateBudget
+	if rateBudget == nil {
+		rateBudget = githubRateBudget
+	}
+	if limited, requeue, msg := rateLimited(ctx, cr.Spec.RateLimitThreshold,
+		func(c context.Context) (discovery.Budget, error) { return rateBudget(c, auth) }); limited {
+		setReadyCondition(&cr.Status.Conditions, cr.Generation, metav1.ConditionFalse, reasonRateLimited, msg)
+		return r.updateStatus(ctx, &cr, ctrl.Result{RequeueAfter: requeue})
 	}
 
 	// Rediscover only when the interval has elapsed (or nothing found yet); otherwise reuse

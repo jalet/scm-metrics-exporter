@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -13,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	scmv1alpha1 "github.com/jalet/scm-metrics-exporter/api/v1alpha1"
 	"github.com/jalet/scm-metrics-exporter/internal/discovery"
@@ -24,12 +26,50 @@ const (
 	reasonCredentialInvalid = "CredentialsInvalid"
 	reasonDiscoveryFailed   = "DiscoveryFailed"
 	reasonDispatchFailed    = "DispatchFailed"
+	reasonRateLimited       = "RateLimited"
 
 	// credentialRequeue backs off after a credentials/discovery failure; pendingRequeue
 	// tops up the collection-Job pool as running Jobs finish (parallelism cap reached).
 	credentialRequeue = time.Minute
 	pendingRequeue    = 30 * time.Second
+
+	// rateLimitBuffer pads the requeue past the provider's reported reset so the next pass
+	// sees the window already refilled rather than racing the boundary.
+	rateLimitBuffer = 15 * time.Second
 )
+
+// rateLimitRequeue returns how long to wait before retrying after a rate-limit pause: until
+// the provider's reset plus a small buffer, floored at pendingRequeue so a stale, zero, or
+// past reset time cannot busy-loop the reconciler.
+func rateLimitRequeue(reset time.Time) time.Duration {
+	d := time.Until(reset) + rateLimitBuffer
+	if d < pendingRequeue {
+		d = pendingRequeue
+	}
+	return d
+}
+
+// rateLimited reports whether the credential's remaining API budget is below threshold and,
+// if so, the requeue delay until the provider's rate-limit window resets and a message for
+// the Ready condition. A zero threshold or a probe error is fail-open (limited=false): a
+// flaky probe must never halt collection. The probe closure adapts a provider's typed
+// RateBudget func to the shared budget signal.
+func rateLimited(ctx context.Context, threshold int32, probe func(context.Context) (discovery.Budget, error)) (limited bool, requeue time.Duration, msg string) {
+	if threshold <= 0 {
+		return false, 0, ""
+	}
+	b, err := probe(ctx)
+	if err != nil {
+		logf.FromContext(ctx).Info("rate-limit probe failed; proceeding with dispatch", "error", err.Error())
+		return false, 0, ""
+	}
+	if !b.Known || b.Remaining >= int(threshold) {
+		return false, 0, ""
+	}
+	return true, rateLimitRequeue(b.Reset), fmt.Sprintf(
+		"API budget low (remaining=%d < %d); pausing dispatch until %s",
+		b.Remaining, threshold, b.Reset.Format(time.RFC3339))
+}
 
 // setReadyCondition sets the shared Ready condition on a CR's status conditions.
 func setReadyCondition(conds *[]metav1.Condition, generation int64, status metav1.ConditionStatus, reason, message string) {

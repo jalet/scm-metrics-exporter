@@ -358,6 +358,10 @@ After changing API types or RBAC markers, run `mise run generate manifests` and
   check the Job logs (`kubectl logs job/<name>`).
 - **CR `Ready=False` / `DiscoveryFailed`** -- the operator could not list repositories:
   check the credentials and that the token/App can see the target's repos/projects.
+- **CR `Ready=False` / `RateLimited`**: the credential's remaining API budget dropped below
+  `spec.rateLimitThreshold`, so the operator paused dispatching new collection Jobs. It
+  resumes after the provider's rate-limit window resets. See the
+  [CRD reference](docs/crd-reference.md#rate-limit-handling).
 - **`scm_exporter_scrape_errors_total{source="lifecycle"}` increasing** -- Valkey is
   unreachable from the collection Jobs (`collectLifecycle` is on). The histogram is skipped
   but every other metric still flows; fix reachability. See

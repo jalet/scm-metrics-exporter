@@ -120,6 +120,11 @@ func (p *Provider) codeScanningForRepo(ctx context.Context, owner, repo string) 
 			rate, rateKnown = int64(resp.Rate.Remaining), true
 		}
 		if e != nil {
+			if isRateLimit(e) {
+				zlog.Warn().Str("provider", "github").Str("source", "rest").Str("owner", owner).Str("repo", repo).
+					Err(e).Msg("github rate limited during code scanning")
+				return findings, rate, rateKnown, false, e
+			}
 			if notAccessible(e) {
 				return findings, rate, rateKnown, false, nil
 			}
@@ -173,13 +178,27 @@ func codeScanningFinding(a *gh.Alert) provider.Finding {
 }
 
 // notAccessible reports whether err is a 403/404 API error (feature disabled or no access
-// on a single repo), which for per-repo iteration is a skip rather than a source failure.
+// on a single repo), which for per-repo iteration is a skip rather than a source failure. A
+// rate-limit error is never accessible-skip: GitHub signals primary exhaustion as a 403, and
+// swallowing it would hide the throttle as "feature disabled" and report empty findings.
 func notAccessible(err error) bool {
+	if isRateLimit(err) {
+		return false
+	}
 	var er *gh.ErrorResponse
 	if errors.As(err, &er) && er.Response != nil {
 		return er.Response.StatusCode == http.StatusForbidden || er.Response.StatusCode == http.StatusNotFound
 	}
 	return false
+}
+
+// isRateLimit reports whether err is a GitHub rate-limit error: a primary RateLimitError
+// (quota exhausted) or a secondary AbuseRateLimitError. Callers surface these as source
+// failures rather than skipping the repository.
+func isRateLimit(err error) bool {
+	var rle *gh.RateLimitError
+	var abuse *gh.AbuseRateLimitError
+	return errors.As(err, &rle) || errors.As(err, &abuse)
 }
 
 // codeScanningSeverity prefers the security-severity level (critical/high/medium/low)

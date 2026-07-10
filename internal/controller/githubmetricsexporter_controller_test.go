@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -67,12 +68,19 @@ func stubDiscover(repos ...string) func(context.Context, discovery.GitHubAuth, s
 	}
 }
 
+// stubGitHubBudget returns a fixed rate budget, so the dispatch gate needs no network.
+func stubGitHubBudget(b discovery.Budget, err error) func(context.Context, discovery.GitHubAuth) (discovery.Budget, error) {
+	return func(context.Context, discovery.GitHubAuth) (discovery.Budget, error) { return b, err }
+}
+
 func newReconciler(repos ...string) *GitHubMetricsExporterReconciler {
 	return &GitHubMetricsExporterReconciler{
 		Client:        k8sClient,
 		Scheme:        k8sClient.Scheme(),
 		ExporterImage: testImage,
 		DiscoverRepos: stubDiscover(repos...),
+		// Ample budget by default so existing tests dispatch as before; gate tests override.
+		RateBudget: stubGitHubBudget(discovery.Budget{Remaining: 5000, Known: true}, nil),
 	}
 }
 
@@ -415,6 +423,85 @@ func TestReconcileMissingSecretSetsCondition(t *testing.T) {
 	}
 	if jobs := listJobs(t, ns, "gh-nocreds"); len(jobs) != 0 {
 		t.Errorf("dispatched %d jobs, want 0 when credentials are invalid", len(jobs))
+	}
+}
+
+func TestReconcilePausesWhenRateLimited(t *testing.T) {
+	ctx := context.Background()
+	ns := createNamespace(t)
+	createSecret(t, ns, "gh-creds", map[string][]byte{"token": []byte("ghp_x")})
+
+	cr := &scmv1alpha1.GitHubMetricsExporter{
+		ObjectMeta: metav1.ObjectMeta{Name: "gh-rl", Namespace: ns},
+		Spec: scmv1alpha1.GitHubMetricsExporterSpec{
+			ExporterSpec: func() scmv1alpha1.ExporterSpec {
+				s := baseSpec("gh-creds")
+				s.RateLimitThreshold = 200
+				return s
+			}(),
+			Org: "acme", AuthMode: "token", TokenKey: "token",
+		},
+	}
+	if err := k8sClient.Create(ctx, cr); err != nil {
+		t.Fatalf("create cr: %v", err)
+	}
+
+	reset := time.Now().Add(30 * time.Minute)
+	r := newReconciler("alpha", "beta")
+	r.RateBudget = stubGitHubBudget(discovery.Budget{Remaining: 10, Reset: reset, Known: true}, nil)
+
+	res, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "gh-rl", Namespace: ns}})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	if jobs := listJobs(t, ns, "gh-rl"); len(jobs) != 0 {
+		t.Errorf("dispatched %d jobs, want 0 when rate limited", len(jobs))
+	}
+	if res.RequeueAfter < 29*time.Minute || res.RequeueAfter > 31*time.Minute {
+		t.Errorf("RequeueAfter = %v, want ~30m (until the rate-limit reset)", res.RequeueAfter)
+	}
+
+	var got scmv1alpha1.GitHubMetricsExporter
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: "gh-rl", Namespace: ns}, &got); err != nil {
+		t.Fatal(err)
+	}
+	cond := meta.FindStatusCondition(got.Status.Conditions, conditionReady)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != reasonRateLimited {
+		t.Errorf("Ready condition = %+v, want False/RateLimited", cond)
+	}
+	// The pause must not clear the cached discovery inventory.
+	if got.Status.DiscoveredRepositories != nil {
+		t.Errorf("DiscoveredRepositories = %v, want unchanged (discovery is skipped while paused)", got.Status.DiscoveredRepositories)
+	}
+}
+
+func TestReconcileRateLimitProbeFailsOpen(t *testing.T) {
+	ctx := context.Background()
+	ns := createNamespace(t)
+	createSecret(t, ns, "gh-creds", map[string][]byte{"token": []byte("ghp_x")})
+
+	cr := &scmv1alpha1.GitHubMetricsExporter{
+		ObjectMeta: metav1.ObjectMeta{Name: "gh-rlerr", Namespace: ns},
+		Spec: scmv1alpha1.GitHubMetricsExporterSpec{
+			ExporterSpec: func() scmv1alpha1.ExporterSpec {
+				s := baseSpec("gh-creds")
+				s.RateLimitThreshold = 200
+				return s
+			}(),
+			Org: "acme", AuthMode: "token", TokenKey: "token",
+		},
+	}
+	if err := k8sClient.Create(ctx, cr); err != nil {
+		t.Fatalf("create cr: %v", err)
+	}
+
+	r := newReconciler("alpha", "beta")
+	r.RateBudget = stubGitHubBudget(discovery.Budget{}, fmt.Errorf("probe boom"))
+	reconcileWith(t, r, "gh-rlerr", ns)
+
+	if jobs := listJobs(t, ns, "gh-rlerr"); len(jobs) != 2 {
+		t.Errorf("dispatched %d jobs, want 2 (a failed probe must fail open)", len(jobs))
 	}
 }
 

@@ -115,6 +115,11 @@ func (p *Provider) secretScanningForRepo(ctx context.Context, owner, repo string
 			rate, rateKnown = int64(resp.Rate.Remaining), true
 		}
 		if e != nil {
+			if isRateLimit(e) {
+				zlog.Warn().Str("provider", "github").Str("source", "secret_scanning").Str("owner", owner).Str("repo", repo).
+					Err(e).Msg("github rate limited during secret scanning")
+				return findings, rate, rateKnown, false, e
+			}
 			if notAccessible(e) {
 				return findings, rate, rateKnown, false, nil
 			}
