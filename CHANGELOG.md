@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.7.0...v0.8.0) (2026-11-06)
+
+
+### Features
+
+* allow extra volumes, mounts and env on the operator and collection Jobs ([#38](https://github.com/jalet/scm-metrics-exporter/issues/38)) ([69a66dc](https://github.com/jalet/scm-metrics-exporter/commit/69a66dc0382aad1127e0c07923ad1a73775519e1))
+
+
+### Bug Fixes
+
+* **deps:** bump Go to 1.26.10 and patch vulnerable modules ([#39](https://github.com/jalet/scm-metrics-exporter/issues/39)) ([894f042](https://github.com/jalet/scm-metrics-exporter/commit/894f04210f77574e55030442863f806a296a157f))
+
 ## [0.7.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.6.1...v0.7.0) (2026-07-10)
 
 
