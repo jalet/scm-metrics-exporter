@@ -15,15 +15,16 @@ import (
 // gitHubValidator rejects a GitHubMetricsExporter whose credentialsSecret is missing or
 // lacks the key its auth mode needs -- the cross-object check CEL cannot express.
 type gitHubValidator struct {
-	reader client.Reader
+	reader     client.Reader
+	namespaces namespaceSet
 }
 
 var _ admission.Validator[*GitHubMetricsExporter] = &gitHubValidator{}
 
 // SetupGitHubWebhookWithManager registers the GitHubMetricsExporter validating webhook.
-func SetupGitHubWebhookWithManager(mgr ctrl.Manager) error {
+func SetupGitHubWebhookWithManager(mgr ctrl.Manager, watchNamespaces []string) error {
 	return builder.WebhookManagedBy(mgr, &GitHubMetricsExporter{}).
-		WithValidator(&gitHubValidator{reader: mgr.GetAPIReader()}).
+		WithValidator(&gitHubValidator{reader: mgr.GetAPIReader(), namespaces: newNamespaceSet(watchNamespaces)}).
 		Complete()
 }
 
@@ -40,6 +41,9 @@ func (v *gitHubValidator) ValidateDelete(context.Context, *GitHubMetricsExporter
 }
 
 func (v *gitHubValidator) validate(ctx context.Context, cr *GitHubMetricsExporter) error {
+	if err := v.namespaces.validateWatched(cr.Namespace); err != nil {
+		return err
+	}
 	// Defensive: the API server's CEL already ties authMode to its key field, but the
 	// webhook re-derives the required key so it stays correct if CEL ever changes.
 	wantKey := cr.Spec.TokenKey

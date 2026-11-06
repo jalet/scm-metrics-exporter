@@ -43,11 +43,12 @@ func init() {
 }
 
 func main() {
-	var metricsAddr, probeAddr string
+	var metricsAddr, probeAddr, watchNamespacesFlag string
 	var enableLeaderElection bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Address the manager's own metrics endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Address the health/readiness probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election, ensuring only one active manager.")
+	flag.StringVar(&watchNamespacesFlag, "watch-namespaces", "", "Comma-separated namespaces to watch; empty watches every namespace.")
 	zapOpts := zap.Options{Development: false}
 	zapOpts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -63,8 +64,18 @@ func main() {
 		certDir = defaultWebhookCertDir
 	}
 
+	watchNamespaces, err := parseWatchNamespaces(watchNamespacesFlag)
+	if err != nil {
+		setupLog.Error(err, "invalid --watch-namespaces")
+		os.Exit(1)
+	}
+	if len(watchNamespaces) > 0 {
+		setupLog.Info("watching namespaces", "namespaces", watchNamespaces)
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
+		Cache:                  cacheOptions(watchNamespaces),
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
@@ -102,7 +113,7 @@ func main() {
 	// user toggle) so the same binary still starts.
 	//nolint:gosec // certDir is operator-configured (WEBHOOK_CERT_DIR), not attacker input; this only Stats the file.
 	if _, statErr := os.Stat(filepath.Join(certDir, "tls.crt")); statErr == nil {
-		if err := scmv1alpha1.SetupWebhooksWithManager(mgr); err != nil {
+		if err := scmv1alpha1.SetupWebhooksWithManager(mgr, watchNamespaces); err != nil {
 			setupLog.Error(err, "unable to set up admission webhooks")
 			os.Exit(1)
 		}

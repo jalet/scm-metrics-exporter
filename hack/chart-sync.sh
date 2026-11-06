@@ -24,7 +24,7 @@ chart="charts/scm-metrics-exporter"
 } >"${chart}/templates/crds.yaml"
 
 {
-  echo '{{- if .Values.rbac.create }}'
+  echo '{{- if and .Values.rbac.create (not .Values.watchNamespaces) }}'
   echo 'apiVersion: rbac.authorization.k8s.io/v1'
   echo 'kind: ClusterRole'
   echo 'metadata:'
@@ -35,4 +35,21 @@ chart="charts/scm-metrics-exporter"
   echo '{{- end }}'
 } >"${chart}/templates/clusterrole.yaml"
 
-echo "chart:sync wrote ${chart}/templates/{crds.yaml,clusterrole.yaml}"
+# Namespaced mode: the same rules as a Role in each watched namespace.
+{
+  echo '{{- if .Values.rbac.create }}'
+  echo '{{- range .Values.watchNamespaces }}'
+  echo '---'
+  echo 'apiVersion: rbac.authorization.k8s.io/v1'
+  echo 'kind: Role'
+  echo 'metadata:'
+  echo '  name: {{ include "scm-metrics-exporter.fullname" $ }}-manager'
+  echo '  namespace: {{ . }}'
+  echo '  labels:'
+  echo '    {{- include "scm-metrics-exporter.labels" $ | nindent 4 }}'
+  sed -n '/^rules:/,$p' config/rbac/role.yaml
+  echo '{{- end }}'
+  echo '{{- end }}'
+} >"${chart}/templates/role.yaml"
+
+echo "chart:sync wrote ${chart}/templates/{crds.yaml,clusterrole.yaml,role.yaml}"

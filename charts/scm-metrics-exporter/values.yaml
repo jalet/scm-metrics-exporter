@@ -37,6 +37,9 @@ serviceAccount:
 rbac:
   create: true
 
+# Namespaces the operator watches, each with its own Role; empty watches every namespace.
+watchNamespaces: []
+
 resources:
   requests:
     cpu: 50m

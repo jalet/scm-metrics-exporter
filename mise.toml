@@ -107,7 +107,7 @@ run = "helm template scm charts/scm-metrics-exporter >/dev/null"
 [tasks."manifests:check"]
 description = "Regenerate code + manifests + chart sync and fail if committed generated files are stale"
 depends = ["generate", "manifests", "chart:sync"]
-run = "git diff --exit-code -- config 'api/**/zz_generated.deepcopy.go' 'charts/scm-metrics-exporter/templates/crds.yaml' 'charts/scm-metrics-exporter/templates/clusterrole.yaml'"
+run = "git diff --exit-code -- config 'api/**/zz_generated.deepcopy.go' 'charts/scm-metrics-exporter/templates/crds.yaml' 'charts/scm-metrics-exporter/templates/clusterrole.yaml' 'charts/scm-metrics-exporter/templates/role.yaml'"
 
 [tasks.ci]
 description = "Run all CI checks locally (go vet is covered by golangci-lint's govet)"

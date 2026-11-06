@@ -181,7 +181,7 @@ Useful values (see `charts/scm-metrics-exporter/values.yaml` for the full set):
 | `crds.enabled` / `crds.keep` | `true` / `true` | Manage CRDs; keep them on uninstall. |
 | `metrics.bindAddress` | `:8080` | Operator's own controller-runtime metrics port (set `0` to disable the endpoint). |
 | `operator.serviceMonitor.enabled` | `true` | Create a Prometheus Operator ServiceMonitor (plus a metrics Service) for the operator's metrics. Renders only when the `monitoring.coreos.com/v1` CRD is present, so it is a no-op on clusters without Prometheus Operator. |
-| `watchNamespaces` | (all) | Reserved for namespaced mode. |
+| `watchNamespaces` | `[]` (all) | Namespaces the operator watches. When set, the chart grants a `Role` in each instead of the `ClusterRole`, so the operator can read Secrets and run Jobs only there, and the webhook rejects CRs created in any other namespace. The namespaces must exist before install. |
 | `extraEnv` / `extraVolumes` / `extraVolumeMounts` | `[]` | Added to the operator container, which calls the SCM API for discovery. The CR's `env`, `volumes` and `volumeMounts` do the same for the collection Jobs; see [Trust a private CA](docs/how-to-trust-a-private-ca.md). |
 
 ## Custom resource examples

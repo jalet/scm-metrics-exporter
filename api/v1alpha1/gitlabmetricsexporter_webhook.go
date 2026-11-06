@@ -14,15 +14,16 @@ import (
 // gitLabValidator rejects a GitLabMetricsExporter whose credentialsSecret is missing or
 // lacks the tokenKey -- the cross-object check CEL cannot express.
 type gitLabValidator struct {
-	reader client.Reader
+	reader     client.Reader
+	namespaces namespaceSet
 }
 
 var _ admission.Validator[*GitLabMetricsExporter] = &gitLabValidator{}
 
 // SetupGitLabWebhookWithManager registers the GitLabMetricsExporter validating webhook.
-func SetupGitLabWebhookWithManager(mgr ctrl.Manager) error {
+func SetupGitLabWebhookWithManager(mgr ctrl.Manager, watchNamespaces []string) error {
 	return builder.WebhookManagedBy(mgr, &GitLabMetricsExporter{}).
-		WithValidator(&gitLabValidator{reader: mgr.GetAPIReader()}).
+		WithValidator(&gitLabValidator{reader: mgr.GetAPIReader(), namespaces: newNamespaceSet(watchNamespaces)}).
 		Complete()
 }
 
@@ -39,5 +40,8 @@ func (v *gitLabValidator) ValidateDelete(context.Context, *GitLabMetricsExporter
 }
 
 func (v *gitLabValidator) validate(ctx context.Context, cr *GitLabMetricsExporter) error {
+	if err := v.namespaces.validateWatched(cr.Namespace); err != nil {
+		return err
+	}
 	return validateCredentialsSecret(ctx, v.reader, cr.Namespace, cr.Spec.CredentialsSecret.Name, cr.Spec.TokenKey)
 }

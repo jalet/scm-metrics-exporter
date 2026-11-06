@@ -99,3 +99,52 @@ func TestGitLabValidator(t *testing.T) {
 		})
 	}
 }
+
+func TestValidatorsRejectUnwatchedNamespace(t *testing.T) {
+	data := map[string][]byte{"token": []byte("x")}
+	gl := &GitLabMetricsExporter{
+		ObjectMeta: metav1.ObjectMeta{Name: "gl", Namespace: "ns"},
+		Spec: GitLabMetricsExporterSpec{
+			ExporterSpec: ExporterSpec{CredentialsSecret: corev1.LocalObjectReference{Name: "creds"}},
+			Group:        "acme",
+			TokenKey:     "token",
+		},
+	}
+	gh := &GitHubMetricsExporter{
+		ObjectMeta: metav1.ObjectMeta{Name: "gh", Namespace: "ns"},
+		Spec: GitHubMetricsExporterSpec{
+			ExporterSpec: ExporterSpec{CredentialsSecret: corev1.LocalObjectReference{Name: "creds"}},
+			Org:          "acme",
+			AuthMode:     "token",
+			TokenKey:     "token",
+		},
+	}
+	tests := []struct {
+		name       string
+		namespaces []string
+		wantErr    bool
+	}{
+		{"no watch list", nil, false},
+		{"namespace watched", []string{"other", "ns"}, false},
+		{"namespace not watched", []string{"other"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set := newNamespaceSet(tt.namespaces)
+			glv := &gitLabValidator{reader: fakeReader(t, "ns", "creds", data), namespaces: set}
+			if _, err := glv.ValidateCreate(context.Background(), gl); (err != nil) != tt.wantErr {
+				t.Errorf("GitLab ValidateCreate error = %v, wantErr %v", err, tt.wantErr)
+			}
+			ghv := &gitHubValidator{reader: fakeReader(t, "ns", "creds", data), namespaces: set}
+			if _, err := ghv.ValidateUpdate(context.Background(), nil, gh); (err != nil) != tt.wantErr {
+				t.Errorf("GitHub ValidateUpdate error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestNamespaceSetString(t *testing.T) {
+	if got, want := newNamespaceSet([]string{"b", "a"}).String(), "a, b"; got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}

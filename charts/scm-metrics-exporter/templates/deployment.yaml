@@ -41,6 +41,9 @@ spec:
             {{- if .Values.leaderElection.enabled }}
             - --leader-elect
             {{- end }}
+            {{- with .Values.watchNamespaces }}
+            - --watch-namespaces={{ join "," . }}
+            {{- end }}
           env:
             - name: EXPORTER_IMAGE
               value: {{ include "scm-metrics-exporter.exporterImage" . | quote }}
