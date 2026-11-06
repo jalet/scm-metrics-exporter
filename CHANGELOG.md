@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.8.0...v0.9.0) (2026-11-06)
+
+
+### Features
+
+* add watchNamespaces to run the operator with namespaced RBAC ([#41](https://github.com/jalet/scm-metrics-exporter/issues/41)) ([07bd090](https://github.com/jalet/scm-metrics-exporter/commit/07bd0903fb798ed09101eea5637bfbb38cb2dd15))
+
 ## [0.8.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.7.0...v0.8.0) (2026-11-06)
 
 
