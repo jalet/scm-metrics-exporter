@@ -19,7 +19,7 @@ import (
 const (
 	projectsPath = "/api/v4/groups/testgroup/projects"
 	mrsPath      = "/api/v4/groups/testgroup/merge_requests"
-	graphqlPath  = "/api/v4/graphql"
+	graphqlPath  = "/api/graphql"
 )
 
 func serveFixture(t *testing.T, w http.ResponseWriter, name string) {
@@ -64,7 +64,6 @@ func mustNewProvider(t *testing.T, srv *httptest.Server, opts Options) *Provider
 	t.Helper()
 	opts.HTTPClient = srv.Client()
 	opts.BaseURL = srv.URL
-	opts.GraphQLURL = srv.URL + graphqlPath
 	p, err := New(opts)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -249,6 +248,32 @@ func TestSnapshotUserTarget(t *testing.T) {
 	want := []provider.RepoMetrics{{Name: "alice/proj", OpenReviewItems: 2}}
 	if diff := cmp.Diff(want, got.Repos); diff != "" {
 		t.Errorf("repos mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestNewGraphQLEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		giveBase string
+		giveURL  string
+		want     string
+	}{
+		{name: "default", want: "https://gitlab.com/api/graphql"},
+		{name: "instance root", giveBase: "https://gitlab.example.com", want: "https://gitlab.example.com/api/graphql"},
+		{name: "trailing slash", giveBase: "https://gitlab.example.com/", want: "https://gitlab.example.com/api/graphql"},
+		{name: "api v4 base", giveBase: "https://gitlab.example.com/api/v4", want: "https://gitlab.example.com/api/graphql"},
+		{name: "override", giveBase: "https://gitlab.example.com", giveURL: "https://gql.example.com/graphql", want: "https://gql.example.com/graphql"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := New(Options{Token: "glpat-x", BaseURL: tt.giveBase, GraphQLURL: tt.giveURL})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if got := p.graphql.endpoint; got != tt.want {
+				t.Errorf("graphql endpoint = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -27,6 +27,7 @@ import (
 const (
 	defaultBaseURL  = "https://gitlab.com"
 	apiV4           = "/api/v4"
+	graphQLPath     = "/api/graphql"
 	defaultMaxPages = 100
 
 	// Target types. A group uses group-scoped project/MR/vulnerability endpoints; a
@@ -39,8 +40,8 @@ const (
 // Options configures the GitLab provider. Token is required. BaseURL points at a
 // self-hosted instance root (for example https://gitlab.example.com); "/api/v4" is
 // appended. Bearer selects "Authorization: Bearer" (OAuth2 tokens) over the default
-// "PRIVATE-TOKEN" header. GraphQLURL and HTTPClient exist to point tests at an
-// httptest server; when HTTPClient is set it is used verbatim, bypassing the built-in
+// "PRIVATE-TOKEN" header. GraphQLURL overrides <root>/api/graphql. HTTPClient points
+// tests at an httptest server; when set it is used verbatim, bypassing the built-in
 // auth and retry transport.
 type Options struct {
 	Token           string
@@ -94,7 +95,7 @@ func New(opts Options) (*Provider, error) {
 	apiBase := ensureAPIBase(base)
 	gqlEndpoint := opts.GraphQLURL
 	if gqlEndpoint == "" {
-		gqlEndpoint = apiBase + "/graphql"
+		gqlEndpoint = strings.TrimSuffix(apiBase, apiV4) + graphQLPath
 	}
 	targetType := opts.TargetType
 	if targetType == "" {
