@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/jalet/scm-metrics-exporter/compare/v0.9.0...v0.9.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **gitlab:** call GraphQL at /api/graphql, not /api/v4/graphql ([#43](https://github.com/jalet/scm-metrics-exporter/issues/43)) ([ba888d9](https://github.com/jalet/scm-metrics-exporter/commit/ba888d956f9fc31e6b3781626cbd238b4d7695ba))
+
 ## [0.9.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.8.0...v0.9.0) (2026-11-06)
 
 
