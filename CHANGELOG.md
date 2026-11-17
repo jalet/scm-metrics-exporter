@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/jalet/scm-metrics-exporter/compare/v0.9.1...v0.10.0) (2026-11-17)
+
+
+### Features
+
+* **chart:** allow setting the private key of the webhook certificate ([#45](https://github.com/jalet/scm-metrics-exporter/issues/45)) ([b2bb0f2](https://github.com/jalet/scm-metrics-exporter/commit/b2bb0f2ee9a9f1f7add3b04d62bac791c674b3f9))
+
+
+### Bug Fixes
+
+* **deps:** bump Go to 1.26.11 for GO-2026-6859 ([#46](https://github.com/jalet/scm-metrics-exporter/issues/46)) ([a2fe74c](https://github.com/jalet/scm-metrics-exporter/commit/a2fe74c14db8d2388c76c64322c290afbbce92c3))
+
 ## [0.9.1](https://github.com/jalet/scm-metrics-exporter/compare/v0.9.0...v0.9.1) (2026-11-10)
 
 
