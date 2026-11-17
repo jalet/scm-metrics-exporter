@@ -83,6 +83,11 @@ crds:
   enabled: true
   keep: true
 
+# Optional spec.privateKey for the webhook serving Certificate, for example
+# {algorithm: ECDSA, size: 256}. Empty keeps cert-manager's default (RSA 2048).
+certificate:
+  privateKey: {}
+
 # The operator's own controller-runtime metrics endpoint. Exposed on the pod; scraped only
 # when operator.serviceMonitor is enabled (the product's own metrics are OTLP-push). Set
 # bindAddress to "0" to disable the endpoint entirely.

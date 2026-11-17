@@ -6,6 +6,14 @@
         "affinity": {
             "type": "object"
         },
+        "certificate": {
+            "type": "object",
+            "properties": {
+                "privateKey": {
+                    "type": "object"
+                }
+            }
+        },
         "crds": {
             "type": "object",
             "properties": {

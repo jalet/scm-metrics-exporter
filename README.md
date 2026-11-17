@@ -179,6 +179,7 @@ Useful values (see `charts/scm-metrics-exporter/values.yaml` for the full set):
 | `exporterImage.repository` | (operator image) | Image injected into the collection Jobs. |
 | `replicaCount` / `leaderElection.enabled` | `1` / `true` | HA via leader election. |
 | `crds.enabled` / `crds.keep` | `true` / `true` | Manage CRDs; keep them on uninstall. |
+| `certificate.privateKey` | `{}` | `spec.privateKey` of the webhook serving `Certificate`, e.g. `{algorithm: ECDSA, size: 256}`. Empty keeps cert-manager's default (RSA 2048). |
 | `metrics.bindAddress` | `:8080` | Operator's own controller-runtime metrics port (set `0` to disable the endpoint). |
 | `operator.serviceMonitor.enabled` | `true` | Create a Prometheus Operator ServiceMonitor (plus a metrics Service) for the operator's metrics. Renders only when the `monitoring.coreos.com/v1` CRD is present, so it is a no-op on clusters without Prometheus Operator. |
 | `watchNamespaces` | `[]` (all) | Namespaces the operator watches. When set, the chart grants a `Role` in each instead of the `ClusterRole`, so the operator can read Secrets and run Jobs only there, and the webhook rejects CRs created in any other namespace. The namespaces must exist before install. |

@@ -28,3 +28,7 @@ spec:
     kind: Issuer
     name: {{ include "scm-metrics-exporter.fullname" . }}-selfsigned
   secretName: {{ include "scm-metrics-exporter.fullname" . }}-webhook-cert
+  {{- with .Values.certificate.privateKey }}
+  privateKey:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
